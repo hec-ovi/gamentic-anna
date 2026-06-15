@@ -214,7 +214,54 @@ renderTurn(root, state, handlers, opts?: { mode?: "creator" | "play" })
 ```
 `opts` is optional and backward-compatible — ignore it and nothing breaks; read `opts.mode === "creator"` to theme creation.
 
-## 9. Quick checklist before you hand the frontend back
+## 9. Playtest UX requirements (frontend-owned, from live feedback)
+
+These are all on YOUR side of the seam (render.js / style.css). The backend now feeds you
+everything you need for them; this section is the spec. There are exactly THREE views (home picker,
+creator chat, play), and inside play a narration view + a private whisper view. Keep them distinct.
+
+**Echo the player's own line.** Today the player never sees what THEY just did in the public story
+(the whisper drawer already echoes the player's outgoing line as a `pm-you` bubble; the story log does
+not). When `onSubmit(text)` / `onChoice(text)` fire, render the player's own words IMMEDIATELY as a
+distinct "you" beat in the story (before the AI reply streams in). The backend does not echo the line
+back to you, so render it from the handler argument. This is the #1 reported gap ("I do not see my own
+messages"), in both creation and play.
+
+**Gate "Begin the adventure" on `opts.ready`.** The creator render now passes
+`renderTurn(root, state, handlers, { mode: "creator", ready })` with a boolean `ready`. Keep the Begin
+affordance INERT (hidden or visibly disabled) until `ready === true`. The backend guarantees `ready`
+turns true on its own within a few exchanges (the moment the architect signals it, or after enough
+back-and-forth), so the gate always opens, the player is never deadlocked. Until then, the creator view
+is just the question + the composer for the player's answer.
+
+**Hide play-only affordances during creation** (`opts.mode === "creator"`). Creation is a plain chat:
+hide/disable the whisper affordance, the `@`-tag and stack buttons, the inventory strip, the cast rail,
+and the Do/Say/Look modes. Show only the architect's question, the player's typed answers, and (once
+`ready`) Begin. Reveal the full play HUD only when play starts (`opts.mode === "play"`).
+
+**Loaders while the model generates.** `setBusy(root, true)` wraps the FULL duration of every turn.
+Make it a VISIBLE loading state (a typing indicator / shimmer on the pending beat), and make it work
+even before the first `renderTurn` of a view: the opening scene and the first creator question both
+generate before any beat exists, so a busy state on a fresh/empty stage must show a loader, not a blank
+screen. (Right now `setBusy` early-returns when no stage is built yet; build a minimal loading surface
+so the blank gap during the first generation is covered.)
+
+**Typewriter narration.** Ink narration in as if the model is typing (a fast typewriter / progressive
+reveal), so generation feels live. Respect `prefers-reduced-motion` (render instantly for those users).
+
+**Whisper vs narration must look different.** Whisper replies are private chat BUBBLES with the
+character's avatar in the drawer (`pushWhisperReply` already routes there); narration is prose in the
+story log. Never let a whisper reply leak into the public story, and never style a narration beat as a
+chat bubble.
+
+**Clear view transitions.** The backend now hands `renderTurn` / `renderHome` a FRESH `#root` element
+every time the view changes (home -> creator -> play -> home). Two consequences: (a) you always get a
+clean element on a view change, so a previous view's beats can never bleed into the next (this fixes
+"when I start an adventure I see the full messages of the creation"); (b) you may animate the transition
+(fade/slide) knowing the stage rebuilds from scratch on the fresh element. Do not rely on persisting DOM
+across a view change.
+
+## 10. Quick checklist before you hand the frontend back
 
 - [ ] `renderTurn(root, state, handlers)` and `setBusy(root, busy)` still exported with these signatures.
 - [ ] Renders `scene.text`, `characters[].name/look`, `inventory[].name`, `choices[]`.
@@ -229,3 +276,9 @@ renderTurn(root, state, handlers, opts?: { mode?: "creator" | "play" })
       per row, a New Adventure action, a graceful empty state; never throws.
 - [ ] A home/menu affordance in play + creator that calls `onHome()`.
 - [ ] (Optional) creator-phase theming via `renderTurn`'s `opts.mode === "creator"`.
+- [ ] Player's own line echoed as a "you" beat on `onSubmit` / `onChoice` (story) — section 9.
+- [ ] "Begin the adventure" gated on `opts.ready` (inert until ready) — section 9.
+- [ ] Play-only affordances (whisper, tag, inventory, cast, modes) hidden when `opts.mode === "creator"`.
+- [ ] `setBusy` shows a visible loader, including on a fresh/empty stage (first turn of a view).
+- [ ] Narration inks in (typewriter), respecting `prefers-reduced-motion`.
+- [ ] Whisper replies render as avatar bubbles in the drawer, never as public narration.

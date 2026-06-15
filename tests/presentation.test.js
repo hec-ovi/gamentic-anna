@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parsePresentation } from "../bundle/core.js";
+import { parsePresentation, whisperReply } from "../bundle/core.js";
 
 // The verified-live "Elder Bramble" turn: the one structured contract the UI
 // renders. Used clean, fenced, and prose-wrapped below.
@@ -152,6 +152,48 @@ describe("parsePresentation", () => {
       expect(r.state.inventory).toEqual([]);
       expect(r.state.choices).toEqual([]);
       expect(r.state.scene.image_prompt).toBeNull();
+    }
+  });
+});
+
+describe("whisperReply", () => {
+  // THE LIVE WHISPER BUG: a whisper reply comes back as plain prose, so
+  // parsePresentation reports ok:false. whisperReply must STILL surface the
+  // spoken line (from scene.text), not discard it and leave only "silence".
+  it("(a) plain-prose reply (ok:false): returns the spoken line, not ''", () => {
+    const spoken = '"You came back for me. I knew you would."';
+    const parsed = parsePresentation(spoken);
+    expect(parsed.ok).toBe(false); // prose, not JSON
+    expect(whisperReply(parsed)).toBe(spoken);
+  });
+
+  it("(b) JSON reply (ok:true): reads the line out of scene.text", () => {
+    const json = JSON.stringify({
+      scene: { text: "Layla leans close: \"Meet me at the docks.\"", image_prompt: null },
+      characters: [],
+      inventory: [],
+      choices: [],
+    });
+    const parsed = parsePresentation(json);
+    expect(parsed.ok).toBe(true);
+    expect(whisperReply(parsed)).toBe('Layla leans close: "Meet me at the docks."');
+  });
+
+  it("(c) trims surrounding whitespace/newlines", () => {
+    expect(whisperReply(parsePresentation("  \n  She only nods.  \n"))).toBe("She only nods.");
+  });
+
+  it("(d) genuinely empty reply -> '' (caller shows the silence fallback)", () => {
+    expect(whisperReply(parsePresentation(""))).toBe("");
+    expect(whisperReply(parsePresentation("   "))).toBe("");
+    const emptyScene = parsePresentation(JSON.stringify({ scene: { text: "" }, choices: [] }));
+    expect(whisperReply(emptyScene)).toBe("");
+  });
+
+  it("(e) defensive: malformed/missing parse results never throw, yield ''", () => {
+    for (const bad of [null, undefined, {}, { state: null }, { state: {} }, { state: { scene: null } }, 42]) {
+      expect(() => whisperReply(bad)).not.toThrow();
+      expect(whisperReply(bad)).toBe("");
     }
   });
 });

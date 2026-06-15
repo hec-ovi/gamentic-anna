@@ -221,6 +221,26 @@ export function parsePresentation(text) {
   return { ok: true, state, raw };
 }
 
+/**
+ * Extract a character's spoken reply from a parsed WHISPER turn.
+ *
+ * The GM is asked to answer a private whisper "as that character speaking
+ * quietly", and in practice it replies with PLAIN PROSE far more often than the
+ * JSON turn shape. parsePresentation then reports ok:false while placing that
+ * raw prose in scene.text (its tolerant fallback). So we read scene.text
+ * REGARDLESS of `ok` - that is where the spoken line lives in both cases (a JSON
+ * reply puts the line in scene.text; a prose reply lands there as the raw text).
+ * Returns the trimmed reply, or "" when there is genuinely nothing to say (the
+ * caller then shows its "watches you in silence" fallback). Never throws.
+ *
+ * @param {{ ok?: boolean, state?: { scene?: { text?: string } } }} parsed a parsePresentation result
+ * @returns {string}
+ */
+export function whisperReply(parsed) {
+  const scene = parsed && parsed.state && parsed.state.scene;
+  return toStr(scene && scene.text).trim();
+}
+
 // --- The live agent turn loop (pure logic only) ---------------------------
 //
 // Everything below is the brain of the playable loop, kept here so it stays
@@ -438,6 +458,28 @@ export function isCreatorReady(text) {
     .replace(/[ \t]{2,}/g, " ")
     .trim();
   return { ready, text: stripped };
+}
+
+/**
+ * Decide whether the creator's "Begin the adventure" affordance should be live.
+ *
+ * It becomes available as soon as the architect signals readiness (the [ready]
+ * marker), OR once enough world-building exchanges have happened that we must
+ * not keep the player waiting behind a weak model that simply forgets to emit
+ * the marker (the "design for the dumbest model" guard against a deadlocked
+ * creator). The frontend uses this (via the render `opts.ready` flag) to gate
+ * the Begin button; this floor guarantees the gate always opens. Never throws.
+ *
+ * @param {boolean} ready the parsed [ready] signal for the latest reply
+ * @param {number} exchanges how many creator turns the player has completed
+ * @param {number} [floor=3] grant readiness after this many exchanges regardless
+ * @returns {boolean}
+ */
+export function creatorCanBegin(ready, exchanges, floor = 3) {
+  if (ready) return true;
+  const n = Number.isFinite(exchanges) ? exchanges : 0;
+  const f = Number.isFinite(floor) && floor > 0 ? floor : 3;
+  return n >= f;
 }
 
 /**

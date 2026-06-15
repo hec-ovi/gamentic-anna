@@ -8,7 +8,7 @@
 // No DOM, no SDK: these are plain vitest unit tests over pure functions.
 
 import { describe, it, expect } from "vitest";
-import { reduceTurn, assistantText, parsePresentation } from "../bundle/core.js";
+import { reduceTurn, assistantText, parsePresentation, whisperReply } from "../bundle/core.js";
 
 // A small presentation-state factory (the shape parsePresentation emits).
 function state(over = {}) {
@@ -194,6 +194,27 @@ describe("assistantText", () => {
 
   it("ignores error frames (yields empty so the graceful fallback runs)", () => {
     expect(assistantText([{ event: "error", code: "x", message: "boom" }])).toBe("");
+  });
+
+  // The exact live whisper path: the GM answers a private whisper as plain
+  // prose (NOT the JSON turn shape), streamed as real-backend SSE deltas. The
+  // loop must still surface the spoken line (this was the "watches you in
+  // silence" bug: gating the reply on parse.ok discarded the prose).
+  it("end to end: a PLAIN-PROSE whisper reply -> assistantText -> parsePresentation -> whisperReply", () => {
+    const spoken = '"Keep your voice down. The captain is not who he says he is."';
+    const frames = [...spoken].map((ch) => ({ event: "sse", choices: [{ delta: { content: ch } }] }));
+    const text = assistantText(frames);
+    const parsed = parsePresentation(text);
+    expect(parsed.ok).toBe(false); // prose, not JSON
+    expect(whisperReply(parsed)).toBe(spoken); // ...yet the line is surfaced
+  });
+
+  it("end to end: a JSON whisper reply -> whisperReply reads scene.text", () => {
+    const json = '{"scene":{"text":"She presses a key into your palm: \\"Go now.\\""},"characters":[],"inventory":[],"choices":[]}';
+    const frames = [...json].map((ch) => ({ event: "sse", choices: [{ delta: { content: ch } }] }));
+    const parsed = parsePresentation(assistantText(frames));
+    expect(parsed.ok).toBe(true);
+    expect(whisperReply(parsed)).toBe('She presses a key into your palm: "Go now."');
   });
 
   it("end to end: real-shape frames -> assistantText -> parsePresentation -> reduceTurn", () => {

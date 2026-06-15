@@ -28,9 +28,11 @@ import {
   assistantText,
   recap,
   parsePresentation,
+  whisperReply,
   saveState,
   loadState,
   isCreatorReady,
+  creatorCanBegin,
   upsertAdventure,
   removeAdventure,
   deriveTitle,
@@ -133,6 +135,7 @@ renderTurn(root, MOCK_TURN, previewHandlers);
   let CURRENT_ID = null; // the id of the adventure being created / played
   let NEEDS_RECAP = false; // a resumed game re-seeds the fresh session once
   let creatorReady = false; // the creator has signalled the world is ready
+  let creatorTurns = 0; // how many creator exchanges the player has completed
   let lastCreatorText = ""; // the latest creator prose (the agreed-on world)
 
   // Open a fresh agent session with the given system prompt, routing through the
@@ -216,6 +219,18 @@ renderTurn(root, MOCK_TURN, previewHandlers);
   }
 
   // --- render helpers ------------------------------------------------------
+  // Swap in a fresh, empty #root element so the NEXT renderTurn rebuilds the
+  // stage from scratch instead of APPENDING to the prior mode's beats. This is
+  // what keeps the world-building chat from bleeding into the opening play scene
+  // (creation and gameplay are two different views). renderTurn keys its built
+  // stage per-element, so handing it a brand-new element forces a clean rebuild;
+  // `root` is reassigned so every later call paints the fresh element.
+  const resetStage = () => {
+    const fresh = root.cloneNode(false);
+    root.replaceWith(fresh);
+    root = fresh;
+  };
+
   // renderPlay reads GAME.roster for the persistent cast (the reducer keeps the
   // full roster across turns; an incoming turn only names who is present now).
   const renderPlay = (state) =>
@@ -240,8 +255,11 @@ renderTurn(root, MOCK_TURN, previewHandlers);
         scene: { text, image_prompt: null },
         characters: [],
         inventory: [],
-        // "Begin" is ALWAYS offered so the player is never stuck waiting for the
-        // model to emit [ready]; the marker (when it lands) just flags readiness.
+        // The "Begin" choice is always passed (so the button exists in the
+        // creator UI), but opts.ready GATES it: the frontend keeps Begin
+        // inert/hidden until ready is true. creatorCanBegin computes ready as
+        // "[ready] marker OR enough exchanges", so the gate always opens
+        // eventually and the player is never deadlocked behind a silent model.
         choices: ["Begin the adventure"],
       },
       handlers,
@@ -286,6 +304,7 @@ renderTurn(root, MOCK_TURN, previewHandlers);
     CURRENT_ID = crypto.randomUUID();
     GAME = null;
     creatorReady = false;
+    creatorTurns = 0;
     NEEDS_RECAP = false;
     SESS = await newSession(CREATOR_RULESET);
     setBusy(root, true);
@@ -299,7 +318,7 @@ renderTurn(root, MOCK_TURN, previewHandlers);
       const { ready, text } = isCreatorReady(t);
       creatorReady = ready;
       lastCreatorText = text;
-      renderCreator(text, ready);
+      renderCreator(text, creatorCanBegin(ready, creatorTurns));
     } catch (e) {
       console.log("[gamentic] creator open failed:", e?.message || e);
       renderCreator(
@@ -320,8 +339,9 @@ renderTurn(root, MOCK_TURN, previewHandlers);
       const t = (res.state.scene.text || "").trim();
       const { ready, text } = isCreatorReady(t);
       creatorReady = ready;
+      creatorTurns += 1;
       if (text) lastCreatorText = text;
-      renderCreator(text || "(...)", ready);
+      renderCreator(text || "(...)", creatorCanBegin(creatorReady, creatorTurns));
     } catch (e) {
       console.log("[gamentic] creator turn failed:", e?.message || e);
       renderCreator(
@@ -345,7 +365,7 @@ renderTurn(root, MOCK_TURN, previewHandlers);
       const seed =
         "Begin the adventure we just designed. The world: " +
         (lastCreatorText || "a world of your choosing") +
-        "\n\nOpen with the first scene now.";
+        "\n\nOpen with the first scene now. Give the player 1 to 3 starting items that fit this world (fill the inventory), and name any characters present.";
       let res = await runOnce(seed);
       if (!usable(res)) {
         const retry = await runOnce(
@@ -357,6 +377,9 @@ renderTurn(root, MOCK_TURN, previewHandlers);
       GAME = reduceTurn(null, res.state);
       GAME.title = deriveTitle(lastCreatorText || res.state.scene.text);
       await persist();
+      // Leave the creation chat behind: paint the opening on a fresh stage so the
+      // world-building beats do not appear in the playable story.
+      resetStage();
       renderPlay(res.state);
     } catch (e) {
       console.log("[gamentic] begin failed:", e?.message || e);
@@ -439,7 +462,11 @@ renderTurn(root, MOCK_TURN, previewHandlers);
         "[private whisper to " + name + "] " + message;
       NEEDS_RECAP = false;
       const res = await runOnce(content);
-      const reply = usable(res) ? res.state.scene.text.trim() : "";
+      // A whisper reply is usually PLAIN PROSE, not the JSON turn shape, so
+      // parse.ok is false even though scene.text holds the spoken line.
+      // whisperReply reads scene.text regardless of `ok`, so the in-character
+      // reply is shown instead of the "silence" fallback (the live whisper bug).
+      const reply = whisperReply(res);
       showWhisper(name, reply || "(" + name + " only watches you in silence.)");
     } catch (e) {
       console.log("[gamentic] whisper failed:", e?.message || e);
@@ -479,6 +506,8 @@ renderTurn(root, MOCK_TURN, previewHandlers);
     CURRENT_ID = id;
     NEEDS_RECAP = true;
     SESS = await newSession(GM_RULESET);
+    // Open the saved story on a clean stage (no leftover beats from a prior view).
+    resetStage();
     renderPlay({
       scene: GAME.scene,
       characters: GAME.roster,

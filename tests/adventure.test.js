@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   CREATOR_RULESET,
   isCreatorReady,
+  creatorCanBegin,
   upsertAdventure,
   removeAdventure,
   deriveTitle,
@@ -71,6 +72,38 @@ describe("isCreatorReady", () => {
       expect(r.ready).toBe(false);
       expect(r.text).toBe("");
     }
+  });
+});
+
+describe("creatorCanBegin", () => {
+  it("is true immediately when the [ready] marker fired, at any exchange count", () => {
+    expect(creatorCanBegin(true, 0)).toBe(true);
+    expect(creatorCanBegin(true, 1)).toBe(true);
+  });
+
+  it("stays false early when not ready (the Begin gate is closed)", () => {
+    expect(creatorCanBegin(false, 0)).toBe(false);
+    expect(creatorCanBegin(false, 1)).toBe(false);
+    expect(creatorCanBegin(false, 2)).toBe(false);
+  });
+
+  it("opens at the default floor (3 exchanges) even without the marker - never deadlocks", () => {
+    expect(creatorCanBegin(false, 3)).toBe(true);
+    expect(creatorCanBegin(false, 5)).toBe(true);
+  });
+
+  it("honors a custom floor", () => {
+    expect(creatorCanBegin(false, 1, 2)).toBe(false);
+    expect(creatorCanBegin(false, 2, 2)).toBe(true);
+  });
+
+  it("treats a bad exchange count as 0 and a bad floor as the default, never throwing", () => {
+    expect(() => creatorCanBegin(false, NaN)).not.toThrow();
+    expect(creatorCanBegin(false, NaN)).toBe(false);
+    expect(creatorCanBegin(false, undefined)).toBe(false);
+    // bad floor -> falls back to default 3
+    expect(creatorCanBegin(false, 3, 0)).toBe(true);
+    expect(creatorCanBegin(false, 2, -1)).toBe(false);
   });
 });
 
