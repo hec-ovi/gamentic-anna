@@ -1,0 +1,31 @@
+{
+  "schema": 2,
+  "permissions": ["storage.read", "storage.write", "chat.append_artifact"],
+  "required_executas": [],
+  "system_prompt_addendum": "When the user wants to play or build a world, summon the game window via open_app_view('play').",
+  "ui": {
+    "bundle": {
+      "format": "static-spa",
+      "entry": "index.html"
+    },
+    "views": [
+      {
+        "name": "play",
+        "title": "Gamentic",
+        "default": true,
+        "default_size": { "w": 960, "h": 720 },
+        "min_size": { "w": 360, "h": 560 },
+        "max_size": { "w": 1600, "h": 1200 },
+        "resizable": true,
+        "movable": true
+      }
+    ],
+    "host_api": {
+      "llm": ["complete"],
+      "storage": ["get", "set", "delete", "list"],
+      "image": ["generate"],
+      "chat": ["append_artifact"],
+      "window": ["set_title"]
+    }
+  }
+}
