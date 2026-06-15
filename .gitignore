@@ -1,0 +1,15 @@
+# local strategy / planning / console notes - never publish
+PLAN.md
+CONSOLE-FORMS.md
+notes/
+.plan/
+
+# deps / build
+node_modules/
+dist/
+.venv/
+__pycache__/
+
+# os
+.DS_Store
+Thumbs.db
