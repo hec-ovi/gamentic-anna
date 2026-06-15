@@ -164,7 +164,57 @@ add `pushWhisperReply` so whispers feel private.
 you change internal markup, update the tests but keep the contract assertions (exports exist, tolerant of
 weak state, handlers fire, never throws, never blanks). Run `npm test` (`vitest run`).
 
-## 8. Quick checklist before you hand the frontend back
+## 8. Adventure management + creator (new — build this in parallel)
+
+The app now supports MULTIPLE saved adventures and a creator (world-building) flow. This adds one new
+render function and a few handlers. As always, the backend calls these; you implement the visuals. The
+backend calls every new function/handler with a `typeof` guard, so you can ship them incrementally and the
+app degrades gracefully until each lands.
+
+### New export: the home / adventure picker
+
+```ts
+// Render the "home" screen: the saved adventures + a way to start a new one.
+// The backend calls this on boot (when adventures exist) and whenever the player
+// returns to the menu. Must never throw; render a friendly empty state when the
+// list is empty.
+export function renderHome(root: HTMLElement, adventures: Adventure[], handlers: HomeHandlers): HTMLElement
+
+type Adventure   = { id: string; title: string; updatedAt: number };  // updatedAt = ms epoch
+type HomeHandlers = {
+  onNewAdventure(): void;       // "New Adventure" -> launches the creator
+  onResume(id: string): void;   // open a saved adventure (e.g. click the row)
+  onDelete(id: string): void;   // delete a saved adventure (a confirm in-UI is welcome)
+};
+```
+- Show each adventure's `title` + a friendly "when" (derive from `updatedAt`), a resume affordance, and a delete affordance.
+- A prominent **New Adventure** action.
+- Empty list -> a welcoming empty state with just **New Adventure**.
+- If `renderHome` is absent, the backend falls back to launching the creator directly (the app still runs), but the list/resume/delete UI won't be reachable until you add it.
+
+### Returning to the menu from play (extends the section 3 handlers)
+
+```ts
+onHome?(): void;   // leave the current adventure and show the picker
+```
+Add a small **home/menu** affordance in the play view (and the creator) that calls `onHome()`.
+
+### The creator REUSES `renderTurn` (no new function needed)
+
+The creator is a short conversation that designs the world before play starts. It renders through the
+existing `renderTurn`:
+- `scene.text` = the creator's question / message (prose).
+- `choices` = suggested directions, plus a **"Begin the adventure"** choice once the world is ready.
+- `characters` / `inventory` are usually empty during creation.
+
+So it already works in the current UI. OPTIONAL: to style the creation phase differently (e.g. a "designing
+your world" header), the backend passes an additive 4th arg you may ignore:
+```ts
+renderTurn(root, state, handlers, opts?: { mode?: "creator" | "play" })
+```
+`opts` is optional and backward-compatible — ignore it and nothing breaks; read `opts.mode === "creator"` to theme creation.
+
+## 9. Quick checklist before you hand the frontend back
 
 - [ ] `renderTurn(root, state, handlers)` and `setBusy(root, busy)` still exported with these signatures.
 - [ ] Renders `scene.text`, `characters[].name/look`, `inventory[].name`, `choices[]`.
@@ -175,3 +225,7 @@ weak state, handlers fire, never throws, never blanks). Run `npm test` (`vitest 
 - [ ] `#root` present, `./app.js` loaded as a module, no external network, accessible, responsive.
 - [ ] `vitest run` green.
 - [ ] (Nice) `pushWhisperReply` exported.
+- [ ] `renderHome(root, adventures, handlers)` exported: lists adventures (title + when), resume + delete
+      per row, a New Adventure action, a graceful empty state; never throws.
+- [ ] A home/menu affordance in play + creator that calls `onHome()`.
+- [ ] (Optional) creator-phase theming via `renderTurn`'s `opts.mode === "creator"`.
