@@ -5,12 +5,28 @@ This is the interface between the **functionality layer** (`bundle/app.js`, `bun
 redesigned freely (look, markup, motion, layout) as long as it keeps this contract. If you keep these
 exports, fields, and behaviors, the live game loop keeps working untouched.
 
-## Ownership
+## File ownership (read this first)
 
-| Layer | Files | Owns |
-| --- | --- | --- |
-| Functionality | `app.js`, `core.js`, `tests/*` (except render) | the game loop, the AI turns, parsing, persistence, image generation |
-| Frontend | `render.js`, `style.css`, `index.html`, `tests/render.test.js` | everything visual: structure, CSS, animation, layout, placeholders |
+The two layers are isolated by file. Stay on your side and the seam below is all that connects us.
+
+**Frontend agent MAY edit ONLY these (presentation):**
+- `bundle/render.js`  (the DOM rendering, animations, the whisper drawer; keep the exports + behavior in section 1)
+- `bundle/style.css`  (all styling, fully free)
+- `bundle/index.html`  (markup, free; but keep an element with `id="root"` and keep `<script type="module" src="./app.js">`)
+- `tests/render.test.js`  (the renderer's tests)
+- You may ADD new asset files the bundle needs (an inline-SVG sprite, etc.), as long as they stay self-contained (no external network).
+
+**Backend agent (the other instance) owns; the frontend agent MUST NOT touch:**
+- `bundle/app.js`  (the SDK boot + live game loop + image generation + persistence)
+- `bundle/core.js`  (the GM prompt, turn parsing/reducer, storage helpers)
+- `manifest.json`, `app.json`  (scopes, grants, identity)
+- `package.json`, `package-lock.json`
+- `tests/llm.test.js`, `tests/storage.test.js`, `tests/presentation.test.js`, `tests/loop.test.js`
+- `FRONTEND_CONTRACT.md`  (this file; the backend maintains it, read it but do not edit)
+
+So: the frontend is the four files `render.js` / `style.css` / `index.html` / `render.test.js`. Everything
+else is backend. The only thing connecting the two is the contract below (the render.js exports + the
+presentation-state shape + the handlers). Honor it and neither side breaks the other.
 
 **You may change anything visual.** Rewrite the markup inside `#root`, the CSS, the animations, the
 procedural placeholders, the glyphs, the responsive layout, add panels and effects. **You must keep the
