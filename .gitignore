@@ -4,6 +4,9 @@ CONSOLE-FORMS.md
 notes/
 .plan/
 
+# anna cli working dir (dev tokens, recordings, staged bundle)
+.anna/
+
 # deps / build
 node_modules/
 dist/
