@@ -16,6 +16,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   renderTurn,
+  setSceneImage,
+  setPortrait,
+  pushWhisperReply,
   initials,
   stripArticle,
   itemGlyphName,
@@ -234,5 +237,48 @@ describe("CAST rail renders the whole roster (not a single card)", () => {
     renderTurn(root, { ...SAMPLE, characters: [] }, {});
     expect(root.querySelectorAll(".char-col")).toHaveLength(0);
     expect(root.querySelector(".char-empty")).toBeTruthy();
+  });
+});
+
+// --- Generated media seam --------------------------------------------------
+
+describe("generated media contract", () => {
+  const img =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Crect width='10' height='10' fill='%2349e6ff'/%3E%3C/svg%3E";
+  const portrait =
+    "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Ccircle cx='5' cy='5' r='5' fill='%23b7ff6d'/%3E%3C/svg%3E";
+
+  it("renders scene.image_url and characters[].portrait when provided", () => {
+    renderTurn(root, {
+      ...SAMPLE,
+      scene: { ...SAMPLE.scene, image_url: img },
+      characters: [{ name: "Elder Bramble", look: "a stooped old figure", portrait }],
+    });
+
+    expect(root.querySelector(".scene-image")).toBeTruthy();
+    expect(root.querySelector(".portrait-img")).toBeTruthy();
+  });
+
+  it("supports progressive scene and portrait patches", () => {
+    renderTurn(root, SAMPLE, {});
+
+    setSceneImage(root, img);
+    setPortrait(root, "Elder Bramble", portrait);
+
+    expect(root.querySelector(".scene-image")).toBeTruthy();
+    const card = [...root.querySelectorAll(".char-col")].find(
+      (el) => el.getAttribute("data-char-name") === "Elder Bramble",
+    );
+    expect(card.getAttribute("data-has-portrait")).toBe("true");
+    expect(card.querySelector(".portrait-img")).toBeTruthy();
+  });
+
+  it("pushWhisperReply renders a private reply in the drawer", () => {
+    renderTurn(root, SAMPLE, {});
+
+    pushWhisperReply(root, "Wren", "The path east is listening.");
+
+    expect(root.querySelector(".whisper-drawer").hasAttribute("hidden")).toBe(false);
+    expect(root.querySelector(".pm-them").textContent).toContain("The path east is listening.");
   });
 });

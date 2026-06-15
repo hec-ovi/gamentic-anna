@@ -8,7 +8,7 @@
 // into a presentation state, folded into the running game, rendered, and
 // persisted under a single storage key so a reload resumes the adventure.
 
-import { renderTurn, setBusy } from "./render.js";
+import { renderTurn, setBusy, pushWhisperReply } from "./render.js";
 import {
   GM_RULESET,
   reduceTurn,
@@ -108,7 +108,18 @@ renderTurn(root, MOCK_TURN, previewHandlers);
 
   // Restore the saved game (or start fresh), and open the GM session.
   let GAME = (await loadState(anna, SAVE_KEY)) || null;
-  const restored = !!(GAME && Array.isArray(GAME.history) && GAME.history.length);
+  // Only restore a save that is actually usable: real history AND a scene whose
+  // narration is non-empty and not a raw-JSON blob (defends against a corrupt
+  // save from an older build). Anything else starts fresh.
+  const savedScene = String((GAME && GAME.scene && GAME.scene.text) || "").trim();
+  const restored = !!(
+    GAME &&
+    Array.isArray(GAME.history) &&
+    GAME.history.length &&
+    savedScene &&
+    !savedScene.startsWith("{")
+  );
+  if (GAME && !restored) GAME = null;
   // If we restored a non-empty game, the very first live turn must re-seed the
   // fresh (memory-less) session with a recap of where the story stands.
   let NEEDS_RECAP = restored;
@@ -118,11 +129,22 @@ renderTurn(root, MOCK_TURN, previewHandlers);
     system_prompt: GM_RULESET,
   });
 
+  // Run one turn against the GM session and parse it. Shared by public turns
+  // and private whispers.
+  const runOnce = async (c) => {
+    const frames = [];
+    for await (const ev of SESS.run({ content: c })) frames.push(ev);
+    return parsePresentation(assistantText(frames));
+  };
+  // A turn is usable only if it parsed AND carries real narration (not empty,
+  // not a raw-JSON fallback blob).
+  const usable = (r) => r.ok && String(r.state.scene.text || "").trim().length > 0;
+
   // Live handlers: every interaction resolves a real turn through the GM.
   const handlers = {
     onChoice: (text) => takeTurn(text),
     onSubmit: (text) => takeTurn(text),
-    onWhisper: (name, message) => takeTurn(message, { whisperTo: name }),
+    onWhisper: (name, message) => whisperTurn(name, message),
   };
 
   // We are live now, so drop the preview mock cleanly: swap in a fresh #root
@@ -160,22 +182,26 @@ renderTurn(root, MOCK_TURN, previewHandlers);
    * @param {string} actionText
    * @param {{ whisperTo?: string }} [opts]
    */
-  async function takeTurn(actionText, { whisperTo } = {}) {
+  async function takeTurn(actionText) {
     setBusy(root, true);
     try {
-      const content =
-        (NEEDS_RECAP ? recap(GAME) + "\n\n" : "") +
-        (whisperTo ? "[private whisper to " + whisperTo + "] " : "") +
-        actionText;
+      const content = (NEEDS_RECAP ? recap(GAME) + "\n\n" : "") + actionText;
       NEEDS_RECAP = false;
 
-      const frames = [];
-      for await (const ev of SESS.run({ content })) {
-        frames.push(ev);
+      let res = await runOnce(content);
+      // A turn can come back empty OR unparseable (truncated/malformed JSON; the
+      // agent path has no structured-output enforcement). Nudge once for a clean
+      // turn before giving up, so the story never shows a blank beat or raw JSON.
+      if (!usable(res)) {
+        const retry = await runOnce(
+          "Continue. Output ONLY the JSON turn object (no other text), and scene.text MUST be a non-empty paragraph describing what happens now.",
+        );
+        if (usable(retry)) res = retry;
       }
-
-      const text = assistantText(frames);
-      const { state } = parsePresentation(text);
+      if (!usable(res)) {
+        throw new Error("unusable turn (empty or unparseable)");
+      }
+      const state = res.state;
       GAME = reduceTurn(GAME, state);
 
       renderTurn(
@@ -207,6 +233,31 @@ renderTurn(root, MOCK_TURN, previewHandlers);
         },
         handlers,
       );
+    } finally {
+      setBusy(root, false);
+    }
+  }
+
+  /**
+   * A whisper is a PRIVATE side-channel with one character: it does NOT advance
+   * the public scene, change choices, or save the main game. The character's
+   * reply is rendered into the whisper drawer thread via pushWhisperReply.
+   * @param {string} name
+   * @param {string} message
+   */
+  async function whisperTurn(name, message) {
+    setBusy(root, true);
+    try {
+      const content =
+        (NEEDS_RECAP ? recap(GAME) + "\n\n" : "") +
+        "[private whisper to " + name + "] " + message;
+      NEEDS_RECAP = false;
+      const res = await runOnce(content);
+      const reply = usable(res) ? res.state.scene.text.trim() : "";
+      pushWhisperReply(root, name, reply || "(" + name + " only watches you in silence.)");
+    } catch (e) {
+      console.log("[gamentic] whisper failed:", e?.message || e);
+      pushWhisperReply(root, name, "(" + name + " seems distracted, and does not answer.)");
     } finally {
       setBusy(root, false);
     }

@@ -1,13 +1,12 @@
-// render.js - the Emberlight presentation-state renderer.
+// render.js - the Neural Minimal presentation-state renderer.
 //
 // A PURE rendering module: no SDK import, no top-level side effects, so it
 // renders standalone in any DOM. It paints the ONE data contract the UI knows:
-//   { scene: { text, image_prompt? }, characters: [{name, look}],
+//   { scene: { text, image_prompt?, image_url? }, characters: [{name, look, portrait}],
 //     inventory: [{name}], choices: [string] }
-// into a cinematic illustrated-novel stage (Emberlight): the scene image is the
-// HERO BACKDROP, the prose is light cast onto it (drop cap + ink-wipe), the
-// cast glows in along a thin rail, and the one HUD object is a stitched
-// bookmark ribbon.
+// into a responsive game stage: scene art is the backdrop, prose appends as a
+// story log, the cast lives in animated profile cards, and the action surface
+// remains keyboard and touch accessible.
 //
 // Public API:
 //   renderTurn(root, state, handlers)  -> builds (first call) or APPENDS a turn
@@ -154,10 +153,9 @@ function rng(seed) {
   };
 }
 
-// The HERO BACKDROP for a scene: layered ember gradients + an inline-SVG
-// treeline/horizon silhouette seeded from image_prompt text. Good enough that a
-// mock turn reads as an atmospheric concept frame, never a gray box. Returns an
-// HTML string for a <div class="backdrop-art">.
+// The HERO BACKDROP for a scene: layered neon gradients + an inline-SVG
+// horizon silhouette seeded from image_prompt text. Good enough that a mock
+// turn reads as an atmospheric concept frame, never a gray box.
 export function sceneBackdrop(imagePrompt) {
   const seed = hashStr(imagePrompt || "ember");
   const rand = rng(seed);
@@ -209,16 +207,33 @@ export function sceneBackdrop(imagePrompt) {
   return svg;
 }
 
-// A character PORTRAIT PLATE placeholder: a soft duotone gradient keyed off the
-// name's hue with a large serif monogram. Returns HTML for inside .col-art.
+function safeMediaUrl(v) {
+  const s = v == null ? "" : String(v).trim();
+  return s || null;
+}
+
+function sceneImageMarkup(url) {
+  return `<img class="scene-image" src="${escapeHtml(url)}" alt="" decoding="async" />`;
+}
+
+function sceneArtMarkup(scene) {
+  return scene.image_url ? sceneImageMarkup(scene.image_url) : sceneBackdrop(scene.image_prompt || scene.text || "");
+}
+
+// A character PORTRAIT PLATE: uses a backend-provided portrait when present,
+// otherwise falls back to a soft duotone monogram keyed off the character name.
 function portraitPlate(c) {
   const hue = placeholderHue(c.name);
   const color = speakerColor(c.name);
   const mono = initials(c.name);
   const altText = [c.name, c.look].filter(Boolean).join(" - ");
-  return `<div class="col-body art-off" role="img" aria-label="${escapeHtml(altText || c.name)}"
+  const img = c.portrait
+    ? `<img class="portrait-img" src="${escapeHtml(c.portrait)}" alt="" loading="lazy" decoding="async" />`
+    : "";
+  return `<div class="col-body ${c.portrait ? "art-on" : "art-off"}" role="img" aria-label="${escapeHtml(altText || c.name)}"
         style="--phue:${hue}; --speaker:${color}">
-        <span class="col-initial">${escapeHtml(mono)}</span>
+        <span class="col-initial" aria-hidden="true">${escapeHtml(mono)}</span>
+        ${img}
       </div>`;
 }
 
@@ -286,6 +301,7 @@ function buildStage(root, handlers) {
     deck,
     sceneName: deck.querySelector("[data-scene-name]"),
     timeChip: deck.querySelector("[data-time-chip]"),
+    location: deck.querySelector("[data-location]"),
     ctxFill: deck.querySelector("[data-ctx-fill]"),
     ctxNum: deck.querySelector("[data-ctx-num]"),
     ribbon: deck.querySelector(".bookmark"),
@@ -300,9 +316,11 @@ function buildStage(root, handlers) {
     drawer,
     handlers,
     mode: "do",
-    lastImagePrompt: undefined,
+    lastArtKey: undefined,
     turnCount: 0,
     characters: [],
+    portraits: new Map(),
+    characterDetails: new Map(),
   };
 
   wireActionBar(refs);
@@ -346,30 +364,30 @@ function glyph(name) {
   return `<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${p}</svg>`;
 }
 
-// THE DECK (top strip): serif logo | stitched dog-ear scene tab with bookmark
-// ribbon | vitals cluster.
+// THE DECK (top strip): logo | scene signal | compact telemetry.
 function buildDeck() {
   const deck = el("header", "play-deck");
   deck.innerHTML = `
     <div class="deck-logo">
       <span class="logo-mark">Gamentic</span>
+      <span class="logo-pulse" aria-hidden="true"></span>
     </div>
     <div class="deck-scene">
       <span class="scene-fold" aria-hidden="true"></span>
       <div class="scene-id">
-        <span class="scene-kicker">The story so far</span>
+        <span class="scene-kicker">Current scene</span>
         <h2 class="scene-name"><span data-scene-name>An untold place</span></h2>
       </div>
-      <span class="time-chip" data-time-chip title="Story time, not yours">${glyph("clock")}<span>Dusk</span></span>
+      <span class="time-chip" data-time-chip title="Current story turn">${glyph("clock")}<span>Turn 01</span></span>
       <div class="bookmark" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Story memory">
         <span class="bookmark-ribbon"><span class="ctx-fill" data-ctx-fill style="height:8%"></span></span>
-        <span class="ctx-num" data-ctx-num>memory</span>
+        <span class="ctx-num" data-ctx-num>sync</span>
       </div>
     </div>
     <div class="deck-vitals">
       <span class="vital hp-capsule" title="Vitality">${glyph("heart")}<span class="hud-num">5/5</span></span>
-      <span class="vital points" title="Points">${glyph("star")}<span class="hud-num">0</span></span>
-      <span class="vital location" title="Where you are"><span data-location>Wilderness</span></span>
+      <span class="vital points" title="Narrative signal">${glyph("star")}<span class="hud-num">AI</span></span>
+      <span class="vital location" title="Scene signal">${glyph("compass")}<span data-location>Unknown</span></span>
     </div>`;
   return deck;
 }
@@ -388,27 +406,27 @@ function buildActionBar(handlers) {
     <form class="action-form" novalidate>
       <div class="composer">
         <div class="composer-modes" role="group" aria-label="Line kind">
-          <button type="button" class="mode-btn active" data-mode="do" aria-pressed="true">Do</button>
-          <button type="button" class="mode-btn" data-mode="say" aria-pressed="false">Say</button>
-          <button type="button" class="mode-btn" data-mode="look" aria-pressed="false">Look</button>
+          <button type="button" class="mode-btn active" data-mode="do" aria-pressed="true" title="Action">Do</button>
+          <button type="button" class="mode-btn" data-mode="say" aria-pressed="false" title="Dialogue">Say</button>
+          <button type="button" class="mode-btn" data-mode="look" aria-pressed="false" title="Observe">Look</button>
         </div>
         <div class="composer-input" id="cmpInput" contenteditable="true" role="textbox"
              aria-multiline="false" aria-label="What you do"
-             data-placeholder="Do or say anything... (Enter sends)"></div>
+             data-placeholder="Do or say anything..."></div>
         <button type="button" class="composer-icon tag-btn" data-tag
                 title="Tag a character or item" aria-label="Tag a character or item">${glyph("at")}</button>
         <button type="button" class="composer-icon stack-btn" data-stack
                 title="Stack this line to send several at once" aria-label="Stack this line">${glyph("plus")}</button>
-        <button class="composer-send" type="submit" data-send>${glyph("send")}<span>Send</span></button>
+        <button class="composer-send" type="submit" data-send aria-label="Send action">${glyph("send")}<span>Send</span></button>
       </div>
     </form>`;
   return bar;
 }
 
 const MODE_PLACEHOLDER = {
-  do: "Do or say anything... (Enter sends)",
+  do: "Do or say anything...",
   say: "What do you say?",
-  look: "Look at what? (empty = study the whole scene)",
+  look: "What catches your eye?",
 };
 const MODE_ARIA = { do: "What you do", say: "What you say", look: "What you look at" };
 
@@ -488,6 +506,7 @@ function buildWhisperDrawer(handlers) {
     portrait: panel.querySelector("[data-wp]"),
     current: null,
     lastFocus: null,
+    history: new Map(),
   };
 
   const close = () => closeWhisper(ref);
@@ -520,8 +539,10 @@ function openWhisper(refs, character) {
   const color = speakerColor(character.name);
   w.portrait.style.setProperty("--phue", hue);
   w.portrait.style.setProperty("--speaker", color);
-  w.portrait.textContent = initials(character.name);
-  w.thread.innerHTML = `<p class="pm-empty">Say something only ${escapeHtml(character.name)} will ever hear.</p>`;
+  w.portrait.innerHTML = character.portrait
+    ? `<span aria-hidden="true">${escapeHtml(initials(character.name))}</span><img src="${escapeHtml(character.portrait)}" alt="" decoding="async" />`
+    : `<span aria-hidden="true">${escapeHtml(initials(character.name))}</span>`;
+  renderWhisperHistory(w, character.name);
   w.overlay.removeAttribute("hidden");
   w.panel.removeAttribute("hidden");
   // next frame -> animate in
@@ -544,9 +565,29 @@ function closeWhisper(w) {
 function appendWhisperLine(w, who, text) {
   const empty = w.thread.querySelector(".pm-empty");
   if (empty) empty.remove();
+  if (w.current) {
+    const list = w.history.get(w.current) || [];
+    list.push({ who, text: String(text == null ? "" : text) });
+    w.history.set(w.current, list);
+  }
   const line = el("div", `pm-line ${who === "you" ? "pm-you" : "pm-them"}`);
   line.innerHTML = `<span class="pm-text">${escapeHtml(text)}</span>`;
   w.thread.append(line);
+  w.thread.scrollTop = w.thread.scrollHeight;
+}
+
+function renderWhisperHistory(w, name) {
+  const lines = w.history.get(name) || [];
+  w.thread.innerHTML = "";
+  if (!lines.length) {
+    w.thread.innerHTML = `<p class="pm-empty">Say something only ${escapeHtml(name)} will ever hear.</p>`;
+    return;
+  }
+  for (const line of lines) {
+    const elLine = el("div", `pm-line ${line.who === "you" ? "pm-you" : "pm-them"}`);
+    elLine.innerHTML = `<span class="pm-text">${escapeHtml(line.text)}</span>`;
+    w.thread.append(elLine);
+  }
   w.thread.scrollTop = w.thread.scrollHeight;
 }
 
@@ -578,6 +619,7 @@ export function renderTurn(root, state, handlers = {}) {
   refs.turnCount += 1;
 
   appendNarration(refs, s.scene.text, refs.turnCount === 1);
+  updateDeck(refs, s);
   setBackdrop(refs, s.scene);
   renderCast(refs, s.characters);
   renderInventory(refs, s.inventory);
@@ -595,15 +637,52 @@ function normalizeState(state) {
     scene: {
       text: scene.text == null ? "" : String(scene.text),
       image_prompt: scene.image_prompt == null ? null : String(scene.image_prompt),
+      image_url: safeMediaUrl(scene.image_url),
     },
     characters: Array.isArray(st.characters)
-      ? st.characters.filter((c) => c && c.name).map((c) => ({ name: String(c.name), look: c.look == null ? "" : String(c.look) }))
+      ? st.characters
+          .filter((c) => c && c.name)
+          .map((c) => ({
+            name: String(c.name),
+            look: c.look == null ? "" : String(c.look),
+            portrait: safeMediaUrl(c.portrait),
+          }))
       : [],
     inventory: Array.isArray(st.inventory)
       ? st.inventory.filter((i) => i && i.name).map((i) => ({ name: String(i.name) }))
       : [],
     choices: Array.isArray(st.choices) ? st.choices.filter((c) => typeof c === "string" && c.trim()) : [],
   };
+}
+
+function compactLabel(text, fallback = "Unknown") {
+  const cleaned = String(text || "")
+    .replace(/\s+/g, " ")
+    .replace(/[^\p{L}\p{N}\s,'-]/gu, "")
+    .trim();
+  if (!cleaned) return fallback;
+  const words = cleaned.split(" ").slice(0, 6).join(" ");
+  return words.length > 42 ? words.slice(0, 41).trimEnd() + "..." : words;
+}
+
+function sceneLabel(scene) {
+  return compactLabel(scene.image_prompt || splitParas(scene.text)[0], "Unmapped signal");
+}
+
+function updateDeck(refs, state) {
+  const label = sceneLabel(state.scene);
+  refs.sceneName.textContent = label;
+  if (refs.location) refs.location.textContent = compactLabel(label, "Unknown");
+
+  const turn = String(refs.turnCount).padStart(2, "0");
+  const timeText = refs.timeChip && refs.timeChip.querySelector("span");
+  if (timeText) timeText.textContent = `Turn ${turn}`;
+
+  const memory = Math.min(100, 12 + refs.turnCount * 9 + state.characters.length * 6 + state.inventory.length * 3);
+  refs.ctxFill.style.height = `${memory}%`;
+  refs.ctxNum.textContent = `${memory}%`;
+  refs.ribbon.setAttribute("aria-valuenow", String(memory));
+  refs.ribbon.classList.toggle("tone-red", memory > 84);
 }
 
 // NARRATION: append a new beat. The first paragraph of the scene-opening turn
@@ -631,15 +710,18 @@ function appendNarration(refs, text, isOpening) {
   refs.story.scrollTop = refs.story.scrollHeight;
 }
 
-// BACKDROP: on the first turn or when image_prompt changes, crossfade to the
-// new procedural art. Stable prompt -> no churn.
+// BACKDROP: on the first turn or when image/image_prompt changes, crossfade to
+// the new art. Stable source -> no churn.
 function setBackdrop(refs, scene) {
-  const prompt = scene.image_prompt || scene.text || "";
-  if (prompt === refs.lastImagePrompt) return;
-  refs.lastImagePrompt = prompt;
+  const key = scene.image_url ? `image:${scene.image_url}` : `prompt:${scene.image_prompt || scene.text || ""}`;
+  if (key === refs.lastArtKey) return;
+  swapBackdrop(refs, key, sceneArtMarkup(scene));
+}
 
+function swapBackdrop(refs, key, markup) {
+  refs.lastArtKey = key;
   const incoming = refs.activeArt === refs.artA ? refs.artB : refs.artA;
-  incoming.innerHTML = sceneBackdrop(prompt);
+  incoming.innerHTML = markup;
   // crossfade
   incoming.classList.add("is-active");
   refs.activeArt.classList.remove("is-active");
@@ -651,6 +733,7 @@ function setBackdrop(refs, scene) {
 function renderCast(refs, characters) {
   const known = new Set(refs.characters);
   refs.charDeck.innerHTML = "";
+  refs.characterDetails.clear();
 
   if (!characters.length) {
     const empty = el("p", "char-empty muted");
@@ -659,8 +742,14 @@ function renderCast(refs, characters) {
   }
 
   for (const c of characters) {
-    const isNew = !known.has(c.name);
-    const card = buildCharCard(refs, c, isNew);
+    const character = {
+      ...c,
+      portrait: c.portrait || refs.portraits.get(c.name) || null,
+    };
+    if (character.portrait) refs.portraits.set(character.name, character.portrait);
+    refs.characterDetails.set(character.name, character);
+    const isNew = !known.has(character.name);
+    const card = buildCharCard(refs, character, isNew);
     refs.charDeck.append(card);
   }
   refs.characters = characters.map((c) => c.name);
@@ -671,17 +760,28 @@ function buildCharCard(refs, c, isNew) {
   const card = el("article", "char-col" + (isNew ? " card-arrive" : ""));
   card.style.setProperty("--speaker", color);
   card.setAttribute("data-char-name", c.name);
+  card.setAttribute("data-has-portrait", c.portrait ? "true" : "false");
 
   const artBtn = el("button", "col-art");
   artBtn.type = "button";
   artBtn.setAttribute("aria-label", `Open ${c.name}'s profile`);
   artBtn.title = `Open ${c.name}'s profile`;
   artBtn.innerHTML = `
-    ${portraitPlate(c)}
-    <div class="col-grad" aria-hidden="true"></div>
-    <div class="col-plate">
-      <span class="char-name">${escapeHtml(c.name)}</span>
-      ${c.look ? `<span class="char-look">${escapeHtml(c.look)}</span>` : ""}
+    <span class="card-scan" aria-hidden="true"></span>
+    <div class="col-flip">
+      <div class="col-face col-front">
+        ${portraitPlate(c)}
+        <span class="col-grad" aria-hidden="true"></span>
+        <span class="col-plate">
+          <span class="char-name">${escapeHtml(c.name)}</span>
+          ${c.look ? `<span class="char-look">${escapeHtml(c.look)}</span>` : ""}
+        </span>
+      </div>
+      <div class="col-face col-back" aria-hidden="true">
+        <span class="back-label">Profile</span>
+        <span class="back-name">${escapeHtml(c.name)}</span>
+        <span class="back-look">${escapeHtml(c.look || "Unknown signal")}</span>
+      </div>
     </div>`;
 
   const whisperBtn = el("button", "chip-btn whisper");
@@ -750,4 +850,48 @@ export function setBusy(root, busy) {
   const refs = STAGE.get(root);
   if (!refs) return;
   refs.stage.classList.toggle("generating", Boolean(busy));
+}
+
+export function setSceneImage(root, url) {
+  const refs = STAGE.get(root);
+  const mediaUrl = safeMediaUrl(url);
+  if (!refs || !mediaUrl) return;
+  swapBackdrop(refs, `image:${mediaUrl}`, sceneImageMarkup(mediaUrl));
+}
+
+export function setPortrait(root, characterName, url) {
+  const refs = STAGE.get(root);
+  const name = characterName == null ? "" : String(characterName);
+  const mediaUrl = safeMediaUrl(url);
+  if (!refs || !name || !mediaUrl) return;
+  refs.portraits.set(name, mediaUrl);
+
+  const character = {
+    ...(refs.characterDetails.get(name) || { name }),
+    portrait: mediaUrl,
+  };
+  refs.characterDetails.set(name, character);
+
+  const card = findCharacterCard(refs, name);
+  if (!card) return;
+  card.setAttribute("data-has-portrait", "true");
+  const body = card.querySelector(".col-body");
+  if (body) body.outerHTML = portraitPlate(character);
+}
+
+export function pushWhisperReply(root, characterName, text) {
+  const refs = STAGE.get(root);
+  if (!refs) return;
+  const name = characterName == null ? "Someone" : String(characterName);
+  if (refs.drawer.current !== name) {
+    const character = refs.characterDetails.get(name) || { name, look: "", portrait: refs.portraits.get(name) || null };
+    openWhisper(refs, character);
+  }
+  appendWhisperLine(refs.drawer, "them", text == null ? "" : String(text));
+}
+
+function findCharacterCard(refs, name) {
+  return [...refs.charDeck.querySelectorAll(".char-col")].find(
+    (card) => card.getAttribute("data-char-name") === name,
+  );
 }
