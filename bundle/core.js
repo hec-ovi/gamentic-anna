@@ -385,3 +385,203 @@ export function recap(game) {
   parts.push(`Carrying: ${items.length ? items.join(", ") : "nothing"}.`);
   return parts.join(" ");
 }
+
+// --- Adventure management + creator (pure logic only) ---------------------
+//
+// Two new surfaces live here, both pure and never-throwing:
+//  - the CREATOR: a short world-building interview that runs as plain prose and
+//    signals readiness with a [ready] marker (isCreatorReady detects/strips it).
+//  - ADVENTURE MANAGEMENT: a tiny index of saved adventures (upsert/remove),
+//    plus deriveTitle to name a fresh one from its seed or opening narration.
+
+/**
+ * The Creator ruleset, embedded verbatim and used as the world-building chat's
+ * system_prompt. Plain prose only; ends with the exact [ready] marker once the
+ * world is genuinely ready. Kept well under the backend's ~4000-char cap.
+ */
+export const CREATOR_RULESET = `You are a warm, imaginative story architect helping someone design a text-adventure world through a short, friendly chat.
+
+Ask ONE focused question at a time, building on their answers, to settle: the setting and genre, the tone, who the player is, and a central hook or starting quest. Offer concrete suggestions they can accept or change. Keep each reply to 1 to 3 short sentences. Be encouraging.
+
+When you have ENOUGH to begin (a setting, a tone, and a starting hook), give a one-line summary of the world you have agreed on, invite them to begin, and end that reply with the exact marker [ready] on its own line. NEVER write [ready] before the world is genuinely ready; if they change direction, simply stop including it until it is ready again.
+
+Reply in plain prose. Do NOT output JSON during creation.`;
+
+/**
+ * Detect the creator "ready" signal in a model reply, and strip the marker.
+ *
+ * A [ready] token (case-insensitive, optionally surrounded by whitespace and
+ * adjacent punctuation) anywhere in the text flags readiness. ALL occurrences
+ * are removed; the remaining text is whitespace-collapsed at the edges and
+ * trimmed. Non-string / empty input yields { ready: false, text: "" }.
+ * Never throws.
+ *
+ * @param {string} text raw model reply
+ * @returns {{ ready: boolean, text: string }}
+ */
+export function isCreatorReady(text) {
+  if (typeof text !== "string" || text.trim() === "") {
+    return { ready: false, text: "" };
+  }
+  // Match a [ready] token (any case, optional inner whitespace), optionally
+  // wrapped in surrounding whitespace/punctuation so a marker on its own line
+  // or trailing a sentence is removed cleanly along with its blank line.
+  const marker = /[ \t]*\[\s*ready\s*\][ \t]*/gi;
+  const ready = marker.test(text);
+  marker.lastIndex = 0;
+  // Replace markers with a single space so words on either side don't fuse,
+  // then collapse the runs of whitespace those replacements may leave behind.
+  const stripped = text
+    .replace(marker, " ")
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  return { ready, text: stripped };
+}
+
+/**
+ * Coerce one adventure-index entry into a clean { id, title, updatedAt } record,
+ * or return null if it carries no usable id. Never throws.
+ */
+function cleanEntry(entry) {
+  if (entry == null || typeof entry !== "object" || Array.isArray(entry)) {
+    return null;
+  }
+  const id = toStr(entry.id).trim();
+  if (!id) return null;
+  return {
+    id,
+    title: toStr(entry.title),
+    updatedAt: entry.updatedAt == null ? "" : toStr(entry.updatedAt),
+  };
+}
+
+/**
+ * Sort an adventure index by updatedAt DESCENDING (most recent first). A missing
+ * /empty updatedAt sorts last. Stable-ish: equal keys keep input order.
+ */
+function sortIndex(list) {
+  return list
+    .map((e, i) => [e, i])
+    .sort((a, b) => {
+      const ua = a[0].updatedAt || "";
+      const ub = b[0].updatedAt || "";
+      if (ua === ub) return a[1] - b[1]; // stable on ties
+      if (!ua) return 1; // a missing -> after b
+      if (!ub) return -1; // b missing -> after a
+      return ua < ub ? 1 : -1; // descending
+    })
+    .map((pair) => pair[0]);
+}
+
+/**
+ * Insert or replace `entry` in an adventure `index`, by id, returning a NEW
+ * array sorted by updatedAt descending. The input is never mutated. An index
+ * that is missing or not an array is treated as []. An entry with no id is
+ * ignored (a cleaned copy of the index is returned). Never throws.
+ *
+ * @param {{id:string,title?:string,updatedAt?:string}[]} index
+ * @param {{id:string,title?:string,updatedAt?:string}} entry
+ * @returns {{id:string,title:string,updatedAt:string}[]}
+ */
+export function upsertAdventure(index, entry) {
+  const base = toArr(index)
+    .map(cleanEntry)
+    .filter(Boolean);
+  const clean = cleanEntry(entry);
+  if (!clean) {
+    // No usable id on the entry: return a cleaned, sorted copy of the index.
+    return sortIndex(base);
+  }
+  const idx = base.findIndex((e) => e.id === clean.id);
+  if (idx === -1) {
+    base.push(clean);
+  } else {
+    base[idx] = clean;
+  }
+  return sortIndex(base);
+}
+
+/**
+ * Remove the entry whose id === `id` from an adventure `index`, returning a NEW
+ * array. The input is never mutated. A missing / non-array index is treated as
+ * []. Never throws.
+ *
+ * @param {{id:string,title?:string,updatedAt?:string}[]} index
+ * @param {string} id
+ * @returns {{id:string,title:string,updatedAt:string}[]}
+ */
+export function removeAdventure(index, id) {
+  const target = toStr(id).trim();
+  return toArr(index)
+    .map(cleanEntry)
+    .filter((e) => e && e.id !== target);
+}
+
+/**
+ * Derive a short human title from a seed string or opening narration. Takes the
+ * first line/sentence, collapses whitespace, strips surrounding quotes and a
+ * little markdown, and trims to <= `max` chars on a word boundary (no mid-word
+ * cut), appending a single ellipsis char when truncated. Empty / non-string
+ * input falls back to "Untitled adventure". Never throws.
+ *
+ * @param {string} text seed or opening narration
+ * @param {number} [max=48]
+ * @returns {string}
+ */
+export function deriveTitle(text, max = 48) {
+  const FALLBACK = "Untitled adventure";
+  if (typeof text !== "string") return FALLBACK;
+
+  // First non-empty line, then first sentence within it.
+  let line = "";
+  for (const raw of text.split(/\r?\n/)) {
+    if (raw.trim()) {
+      line = raw;
+      break;
+    }
+  }
+  // First sentence: stop at ., !, or ? followed by space/end.
+  const sentenceMatch = line.match(/^(.*?[.!?])(\s|$)/);
+  let title = sentenceMatch ? sentenceMatch[1] : line;
+
+  // Collapse all whitespace to single spaces.
+  title = title.replace(/\s+/g, " ").trim();
+
+  // Strip a little leading markdown (heading hashes, list bullets, blockquote).
+  title = title.replace(/^(?:#{1,6}\s+|[-*+]\s+|>\s+)/, "").trim();
+  // Strip surrounding markdown emphasis markers and quote characters, possibly
+  // layered (e.g. **"..."**), peeling one matched wrapper at a time.
+  let prev;
+  do {
+    prev = title;
+    title = title
+      .replace(/^(["'`“”‘’*_~]+)([\s\S]*?)\1$/, "$2")
+      .replace(/^["'`“”‘’*_~]+/, "")
+      .replace(/["'`“”‘’*_~]+$/, "")
+      .trim();
+  } while (title !== prev);
+
+  if (!title) return FALLBACK;
+
+  const limit = Number.isFinite(max) && max > 0 ? Math.floor(max) : 48;
+  if (title.length <= limit) return title;
+
+  // Reserve one char for the ellipsis, then trim back to a word boundary so no
+  // word is cut mid-way. If the slice already ends right at a word boundary
+  // (the next source char is whitespace), keep the whole final word.
+  const ELLIPSIS = "…";
+  let cut = title.slice(0, limit - 1);
+  if (!/\s/.test(title[limit - 1] || "")) {
+    // The slice landed inside a word: drop the partial trailing word.
+    const lastSpace = cut.lastIndexOf(" ");
+    if (lastSpace > 0) cut = cut.slice(0, lastSpace);
+  }
+  cut = cut.replace(/\s+$/, "");
+  if (!cut) {
+    // A single word longer than the limit: hard-cut (still no room for words).
+    cut = title.slice(0, limit - 1);
+  }
+  return cut + ELLIPSIS;
+}
