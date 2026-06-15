@@ -1,9 +1,74 @@
+/* =========================================================================
+   GAMENTIC - EMBERLIGHT
+   A moody illustrated-novel RPG: the scene image is the screen, the story is
+   light cast onto it, a scribe inks each new paragraph in, the cast glows in
+   along the side, and the one HUD number lives in a stitched paper bookmark.
+   Built from nothing but gradients, clip-paths, inline SVG and tokens:
+   no web fonts, no images, no network. Self-contained for a sandboxed iframe.
+   ========================================================================= */
+
+/* -------------------------------------------------------------------------
+   TOKENS - the ember palette (one warm light source over a night ramp)
+   ------------------------------------------------------------------------- */
 :root {
-  --bg: #0e0f13;
-  --panel: #16181f;
-  --ink: #e8e6e0;
-  --muted: #9aa0ad;
-  --accent: #c8a15a;
+  color-scheme: dark;
+
+  /* accent / ember pair */
+  --accent: #e8a24a;
+  --accent-2: #c8702e;
+  --highlight: #ffe6b8;
+
+  /* ink */
+  --ink: #ece7df;
+  --ink-muted: #8c8a93;
+  --ink-prose: #f1ead9;
+  --ink-inverse: #0a0c11;
+
+  /* lines (derived from accent, dim) */
+  --line: color-mix(in srgb, var(--accent) 22%, transparent);
+  --line-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+
+  /* feedback */
+  --gold: #e8a24a;
+  --danger: #d2566b;
+  --success: #7fb069;
+  --item: #4fb8a6;
+  --item-border: #1d5249;
+
+  /* surfaces - the night ramp */
+  --surface-page: #0a0c11;
+  --surface-page-2: #11141d;
+  --surface-panel: #161a24;
+  --surface-panel-2: #10131b;
+  --surface-hover: #20252f;
+  --surface-thread: #0b0d14;
+  --surface-scrim: #060810;
+  --scrim-edge: #060810;
+  --body-glow: #14110c;
+  --shadow-tint: #000000;
+
+  /* effects */
+  --grain-opacity: 0.05;
+  --vignette-opacity: 0.42;
+
+  /* speaker ramp */
+  --speaker-player: var(--accent);
+
+  /* typography - system-only, CSP-safe, zero web fonts */
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Hoefler Text", Georgia, "Times New Roman", serif;
+  --font-prose: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* shape - cinematic = clean rects + soft radii */
+  --radius: 12px;
+  --radius-sm: 7px;
+
+  /* effects & motion */
+  --shadow: 0 10px 30px color-mix(in srgb, var(--shadow-tint) 50%, transparent);
+  --ease-rise: cubic-bezier(0.2, 0.9, 0.2, 1);
+  --ease-pop: cubic-bezier(0.2, 1.4, 0.5, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-settle: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 * {
@@ -17,45 +82,1217 @@ body {
 }
 
 body {
-  background: var(--bg);
+  background: var(--surface-page);
   color: var(--ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  font-family: var(--font-body);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
 }
 
-#root {
-  min-height: 100%;
+#root,
+.emberlight-root {
+  height: 100%;
+}
+
+.noscript {
+  padding: 2rem;
+  color: var(--ink);
+  font-family: var(--font-body);
+}
+
+/* -------------------------------------------------------------------------
+   THE STAGE - a full-viewport cinematic frame with INTERNAL scroll
+   ------------------------------------------------------------------------- */
+.play-stage {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(120% 80% at 50% -10%, var(--body-glow) 0%, transparent 55%),
+    var(--surface-page);
+}
+
+/* L0 + L1: backdrop layers ------------------------------------------------ */
+.backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.backdrop-art {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: scale(1.02);
+  transition: opacity 900ms var(--ease-settle), transform 900ms var(--ease-settle);
+}
+.backdrop-art svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.backdrop-art.is-active {
+  opacity: 1;
+  transform: scale(1);
+  animation: kenburns 42s linear infinite alternate;
+}
+
+@keyframes kenburns {
+  from {
+    transform: scale(1) translate(0, 0);
+  }
+  to {
+    transform: scale(1.06) translate(-1%, -0.6%);
+  }
+}
+
+/* the scrim: side + bottom reading gradients so prose never fights the art */
+.backdrop-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      to right,
+      var(--scrim-edge) 0%,
+      color-mix(in srgb, var(--surface-scrim) 72%, transparent) 36%,
+      transparent 58%,
+      color-mix(in srgb, var(--surface-scrim) 58%, transparent) 86%,
+      var(--scrim-edge) 100%
+    ),
+    linear-gradient(to top, var(--surface-scrim) 0%, transparent 40%),
+    linear-gradient(to bottom, color-mix(in srgb, var(--surface-scrim) 52%, transparent) 0%, transparent 26%);
+}
+
+.backdrop-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(120% 120% at 50% 42%, transparent 48%, var(--surface-scrim) 100%);
+  opacity: var(--vignette-opacity);
+}
+
+/* fine static grain: a tiled radial dot pattern, cheap, no animation */
+.backdrop-grain {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  background-image: radial-gradient(rgba(255, 255, 255, 0.5) 0.5px, transparent 0.5px);
+  background-size: 3px 3px;
+  mix-blend-mode: overlay;
+}
+
+/* -------------------------------------------------------------------------
+   THE DECK (top strip) - transparent over the scrim
+   ------------------------------------------------------------------------- */
+.play-deck {
+  position: relative;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 1rem;
+  padding: clamp(0.7rem, 2vh, 1.3rem) clamp(1rem, 3vw, 2rem) 0.6rem;
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+}
+
+.deck-logo {
+  justify-self: start;
+}
+.logo-mark {
+  font-family: var(--font-display);
+  font-size: clamp(1.4rem, 3vw, 2.2rem);
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  animation: logoIgnite 1.1s var(--ease-settle) 1;
+}
+@keyframes logoIgnite {
+  from {
+    text-shadow: 0 0 0 transparent;
+    opacity: 0.4;
+  }
+  40% {
+    text-shadow: 0 0 22px color-mix(in srgb, var(--accent) 60%, transparent);
+  }
+  to {
+    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7);
+    opacity: 1;
+  }
+}
+
+/* the stitched dog-ear SCENE TAB with the bookmark ribbon memory meter */
+.deck-scene {
+  position: relative;
+  justify-self: center;
   display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.5rem 1.1rem 0.5rem 0.9rem;
+  background: color-mix(in srgb, var(--surface-panel) 78%, transparent);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  backdrop-filter: blur(4px);
+  max-width: min(60vw, 520px);
+}
+/* the stitched dog-ear fold (top-right) */
+.scene-fold {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 16px;
+  height: 16px;
+  background: linear-gradient(225deg, var(--accent-2) 0 50%, transparent 50%);
+  border-top-right-radius: var(--radius-sm);
+  opacity: 0.8;
+  transition: transform 500ms var(--ease-settle);
+  transform-origin: top right;
+}
+.deck-scene .scene-id {
+  min-width: 0;
+}
+.scene-kicker {
+  display: block;
+  font-family: var(--font-display);
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.scene-name {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(1rem, 2vw, 1.35rem);
+  font-variant: small-caps;
+  letter-spacing: 0.06em;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.time-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  color: var(--ink-muted);
+  white-space: nowrap;
+}
+.time-chip .ic {
+  width: 14px;
+  height: 14px;
+}
+
+/* the BOOKMARK RIBBON: a hanging paper ribbon whose fill = story memory */
+.bookmark {
+  display: inline-flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  padding: 2rem clamp(1rem, 5vw, 3rem);
-  text-align: center;
+  gap: 0.2rem;
+}
+.bookmark-ribbon {
+  position: relative;
+  width: 14px;
+  height: 30px;
+  background: color-mix(in srgb, var(--surface-panel-2) 90%, transparent);
+  border: 1px solid var(--line-soft);
+  /* notched-bottom ribbon shape */
+  clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%);
+  overflow: hidden;
+}
+.bookmark-ribbon .ctx-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: linear-gradient(to top, var(--success), var(--accent));
+  transition: height 600ms var(--ease-settle);
+}
+.bookmark[aria-valuenow="100"] .ctx-fill,
+.bookmark.tone-red .ctx-fill {
+  background: linear-gradient(to top, var(--accent), var(--danger));
+}
+.ctx-num {
+  font-size: 0.56rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
 }
 
-h1 {
-  margin: 0;
-  font-size: clamp(2rem, 6vw, 3rem);
-  letter-spacing: 0.02em;
+/* the vitals cluster */
+.deck-vitals {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.vital {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.55rem;
+  font-size: 0.8rem;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface-panel) 55%, transparent);
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+}
+.vital .ic {
+  width: 15px;
+  height: 15px;
+}
+.vital.hp-capsule .ic {
+  color: var(--danger);
+}
+.vital.points .ic {
   color: var(--accent);
 }
-
-#status {
-  margin: 0;
-  font-size: clamp(0.95rem, 3vw, 1.1rem);
-  color: var(--muted);
+.hud-num {
+  font-variant-numeric: tabular-nums;
 }
 
+/* -------------------------------------------------------------------------
+   THE BODY - reading column (left) + cast rail (right)
+   ------------------------------------------------------------------------- */
+.play-body {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  /* the reading measure and the cast rail share a CENTERED stage so there is no
+     dead band of bare backdrop floating between prose and rail. The story track
+     is capped near the reading measure; the whole grid centers under a max
+     stage width. (Pairs with the multi-card rail so the right side is full.) */
+  grid-template-columns: minmax(0, 72ch) clamp(220px, 24vw, 320px);
+  justify-content: center;
+  gap: clamp(1.4rem, 3vw, 3rem);
+  max-width: 1180px;
+  width: 100%;
+  margin-inline: auto;
+  min-height: 0;
+  padding: 0 clamp(1rem, 3vw, 2.4rem);
+  overflow: hidden;
+}
+
+/* the reading column: prose rides on the scrim, NO panel box */
+.story {
+  min-width: 0;
+  overflow-y: auto;
+  padding: clamp(1rem, 3vh, 2rem) 0;
+  /* top + bottom mask so scrolled prose dissolves into the scrim */
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 5%, #000 92%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 5%, #000 92%, transparent 100%);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.story::-webkit-scrollbar {
+  width: 7px;
+}
+.story::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+
+/* NARRATION = bare literary prose, no bubble */
+.narration {
+  max-width: 64ch;
+  margin: 0 auto 1.4rem;
+}
+.narration p,
+.beat-line {
+  font-family: var(--font-prose);
+  font-size: clamp(1.1rem, 1.4vw, 1.22rem);
+  line-height: 1.72;
+  color: var(--ink-prose);
+  margin: 0 0 1rem;
+  text-wrap: pretty;
+  text-shadow: 0 1px 12px rgba(6, 8, 16, 0.85);
+}
+
+/* the SIGNATURE ink-reveal: each paragraph fades+rises AND wipes L-to-R */
+.beat-line {
+  animation: inkReveal 600ms var(--ease-rise) both;
+  animation-delay: calc(var(--beat, 0) * 120ms);
+}
+@keyframes inkReveal {
+  from {
+    opacity: 0;
+    transform: translateY(7px);
+    clip-path: inset(0 100% 0 0);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+/* the gilt DROP CAP on the scene-opening paragraph's first letter */
+.narration.scene-open > .beat-line:first-of-type::first-letter {
+  font-family: var(--font-display);
+  float: left;
+  font-size: 3.1em;
+  line-height: 0.78;
+  padding: 0.06em 0.1em 0 0;
+  margin-right: 0.04em;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--highlight), var(--accent) 45%, var(--accent-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--accent);
+}
+.narration.scene-open {
+  animation: dropcapIgnite 700ms var(--ease-settle) both;
+}
+@keyframes dropcapIgnite {
+  from {
+    filter: brightness(0.7);
+  }
+  to {
+    filter: brightness(1);
+  }
+}
+
+/* the faint scene-break rubrication tick */
+.scene-tick {
+  display: block;
+  width: 48px;
+  height: 2px;
+  margin: 0.4rem auto 1.6rem;
+  background: linear-gradient(to right, transparent, var(--accent), transparent);
+  opacity: 0.5;
+  border-radius: 2px;
+}
+
+.muted {
+  color: var(--ink-muted);
+}
+
+/* DIALOGUE bubble (low-chrome card lifted off the image, speaker-colored) */
+.dialogue {
+  max-width: 64ch;
+  margin: 0 auto 1.1rem;
+  display: flex;
+  gap: 0.6rem;
+}
+.dialogue .bubble {
+  min-width: 0;
+  flex: 1;
+  background: color-mix(in srgb, var(--surface-panel) 80%, transparent);
+  border-left: 3px solid var(--speaker, var(--accent));
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.85rem;
+  backdrop-filter: blur(3px);
+}
+.bubble-name {
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  color: var(--speaker, var(--accent));
+  display: block;
+  margin-bottom: 0.15rem;
+}
+.dialogue.from-player {
+  flex-direction: row-reverse;
+  text-align: right;
+}
+.dialogue.from-player.whispered .bubble {
+  border-left-color: var(--gold);
+}
+
+/* PLAYER action = quiet right-aligned italic marker */
+.player-action {
+  max-width: 64ch;
+  margin: 0 auto 0.9rem;
+  text-align: right;
+  font-style: italic;
+  color: var(--ink-muted);
+}
+
+/* SYSTEM badge = rounded pill that pops in */
+.system-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.2rem auto 0.9rem;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-panel);
+  color: var(--ink);
+  animation: badgePop 480ms var(--ease-pop) both;
+}
+@keyframes badgePop {
+  from {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.system-badge.points {
+  color: var(--gold);
+}
+.system-badge.item {
+  color: var(--item);
+}
+.system-badge.danger {
+  color: var(--danger);
+}
+
+/* -------------------------------------------------------------------------
+   THE CAST RAIL - thin column of persistent portrait plates over the image
+   ------------------------------------------------------------------------- */
+.char-column {
+  min-width: 0;
+  overflow-y: auto;
+  padding: clamp(1rem, 3vh, 2rem) 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.char-column::-webkit-scrollbar {
+  width: 7px;
+}
+.char-column::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+.col-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-display);
+  font-size: 0.66rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  margin-bottom: 0.7rem;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.7);
+}
+.col-head .ic {
+  width: 16px;
+  height: 16px;
+}
+.char-deck {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.char-empty {
+  font-size: 0.85rem;
+}
+
+/* the portrait PLATE - a COMPACT, height-capped card so the roster grows
+   visibly: several cast members read at once instead of one card eating the
+   whole rail. The plate is a wide landscape frame (not a tall 3:5 poster), the
+   name+look ride on a gradient at its foot, and the cards stack with the whisper
+   chip beneath. Target: 3-5 cards visible before any scroll in an 800px rail. */
+.char-col {
+  --speaker: var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.col-art {
+  position: relative;
+  display: block;
+  width: 100%;
+  /* capped height (not a forced tall aspect-ratio) keeps the card compact */
+  height: clamp(96px, 14vh, 132px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-top: 2px solid var(--speaker);
+  border-radius: var(--radius-sm);
+  background: none;
+  overflow: hidden;
+  cursor: pointer;
+}
+.col-body {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.col-body.art-off {
+  background:
+    radial-gradient(120% 90% at 50% 18%, hsl(var(--phue, 30) 45% 32%) 0%, transparent 60%),
+    linear-gradient(160deg, hsl(var(--phue, 30) 38% 18%), hsl(calc(var(--phue, 30) + 30) 30% 9%));
+}
+.col-initial {
+  font-family: var(--font-display);
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  color: color-mix(in srgb, var(--speaker) 70%, var(--ink));
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+  /* nudge the monogram left so the name plate at the foot stays readable */
+  transform: translateY(-8%);
+}
+.col-grad {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top, var(--surface-scrim) 6%, transparent 62%);
+}
+.col-plate {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+}
+.char-name {
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  color: var(--ink);
+  display: block;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+}
+.char-look {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.66rem;
+  color: var(--ink-muted);
+  line-height: 1.3;
+  margin-top: 0.08rem;
+}
+
+/* card arrival: ink-bloom + speaker glow pulse */
+.card-arrive {
+  animation: cardArrive 1000ms var(--ease-spring) both;
+}
+@keyframes cardArrive {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+.card-arrive .col-art {
+  animation: glowPulse 1400ms var(--ease-settle) both;
+}
+@keyframes glowPulse {
+  0% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  40% {
+    box-shadow: 0 0 20px color-mix(in srgb, var(--speaker) 55%, transparent);
+  }
+  100% {
+    box-shadow: var(--shadow);
+  }
+}
+
+/* the WHISPER affordance on a card (gold channel, disambiguated by glyph) */
+.chip-btn.whisper {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  min-height: 32px;
+  font-family: var(--font-body);
+  font-size: 0.74rem;
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 8%, var(--surface-panel-2));
+  border: 1px solid color-mix(in srgb, var(--gold) 30%, transparent);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 160ms var(--ease-settle), box-shadow 160ms var(--ease-settle);
+}
+.chip-btn.whisper .ic {
+  width: 14px;
+  height: 14px;
+}
+.chip-btn.whisper:hover {
+  background: color-mix(in srgb, var(--gold) 16%, var(--surface-panel-2));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--gold) 22%, transparent);
+}
+
+/* -------------------------------------------------------------------------
+   THE ACTION BAR - inventory, choices, the composer
+   ------------------------------------------------------------------------- */
+.play-actionbar {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: clamp(1rem, 2.5vh, 2rem) clamp(1rem, 3vw, 2.4rem) clamp(1.2rem, 3vh, 2.2rem);
+  background: linear-gradient(to top, var(--surface-scrim) 30%, transparent);
+}
+
+.player-inv {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+.rail-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-display);
+  font-size: 0.62rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+.rail-label .ic {
+  width: 14px;
+  height: 14px;
+  color: var(--item);
+}
+
+.slot-grid {
+  display: flex;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+}
+
+/* READABLE ITEM CHIP: an object glyph + the item's name. No more cryptic
+   2-letter monograms, and no dashed empty padding boxes - just the real items. */
+.item-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 0.32rem 0.7rem 0.32rem 0.5rem;
+  font-family: var(--font-body);
+  font-size: 0.84rem;
+  color: var(--ink);
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--item) 40%, transparent);
+  background: color-mix(in srgb, var(--item) 8%, var(--surface-panel));
+  cursor: pointer;
+  animation: slotPop 460ms var(--ease-pop) both;
+  transition: background 160ms var(--ease-settle), border-color 160ms var(--ease-settle),
+    transform 90ms var(--ease-settle);
+}
+.item-chip:hover {
+  background: color-mix(in srgb, var(--item) 16%, var(--surface-panel));
+  border-color: color-mix(in srgb, var(--item) 60%, transparent);
+}
+.item-chip:active {
+  transform: translateY(1px);
+}
+.item-ic {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  color: var(--item);
+  background: color-mix(in srgb, var(--item) 14%, transparent);
+}
+.item-ic .ic {
+  width: 15px;
+  height: 15px;
+}
+.item-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* the empty-handed state: one quiet line, NOT a row of dashed boxes */
+.inv-empty {
+  font-size: 0.82rem;
+  font-style: italic;
+}
+@keyframes slotPop {
+  0% {
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.25);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* CHOICE keys - tactile rounded buttons */
+.choices-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+.choices-row[hidden] {
+  display: none;
+}
+.choice-key {
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--surface-panel) 92%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.6rem 1rem;
+  min-height: 44px;
+  cursor: pointer;
+  box-shadow: 0 2px 0 color-mix(in srgb, var(--shadow-tint) 60%, transparent), var(--shadow);
+  transition: transform 160ms var(--ease-settle), box-shadow 160ms var(--ease-settle),
+    background 160ms var(--ease-settle), border-color 160ms var(--ease-settle);
+}
+.choice-key:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent) 12%, var(--surface-panel)),
+    var(--surface-panel)
+  );
+  box-shadow: 0 4px 0 color-mix(in srgb, var(--shadow-tint) 60%, transparent), var(--shadow);
+}
+.choice-key:active {
+  transform: translateY(1px);
+  box-shadow: 0 0 0 transparent, var(--shadow);
+}
+
+/* THE COMPOSER */
+.action-form {
+  margin: 0;
+}
+.composer {
+  display: flex;
+  align-items: stretch;
+  gap: 0.45rem;
+  background: color-mix(in srgb, var(--surface-panel) 90%, transparent);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.4rem;
+  backdrop-filter: blur(6px);
+}
+.composer-modes {
+  display: inline-flex;
+  background: var(--surface-panel-2);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+.mode-btn {
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  color: var(--ink-muted);
+  background: none;
+  border: 0;
+  border-radius: 5px;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+  transition: background 160ms var(--ease-settle), color 160ms var(--ease-settle), transform 90ms var(--ease-settle);
+}
+.mode-btn:active {
+  transform: translateY(1px);
+}
+.mode-btn.active {
+  color: var(--ink-inverse);
+  background: var(--accent);
+}
+.composer-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  color: var(--ink);
+  padding: 0.5rem 0.6rem;
+  outline: none;
+  align-self: center;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.composer-input:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink-muted);
+}
+.composer-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel-2);
+  color: var(--ink-muted);
+  cursor: pointer;
+  transition: color 160ms var(--ease-settle), border-color 160ms var(--ease-settle);
+}
+.composer-icon .ic {
+  width: 18px;
+  height: 18px;
+}
+.composer-icon:hover {
+  color: var(--accent);
+  border-color: var(--line);
+}
+.composer-send {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--ink-inverse);
+  background: linear-gradient(to bottom, var(--accent), var(--accent-2));
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 0 1.1rem;
+  cursor: pointer;
+  transition: filter 160ms var(--ease-settle), transform 90ms var(--ease-settle);
+}
+.composer-send .ic {
+  width: 17px;
+  height: 17px;
+}
+.composer-send:hover {
+  filter: brightness(1.08);
+}
+.composer-send:active {
+  transform: translateY(1px);
+}
+
+/* -------------------------------------------------------------------------
+   THE BUSY LOCK - while a turn resolves, mutating surfaces dim + lock
+   ------------------------------------------------------------------------- */
+.play-stage.generating .choices-row,
+.play-stage.generating .composer,
+.play-stage.generating .chip-btn.whisper {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* -------------------------------------------------------------------------
+   THE WHISPER DRAWER - private 1:1 amber channel
+   ------------------------------------------------------------------------- */
+.whisper-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  background: rgba(3, 4, 10, 0.55);
+  opacity: 0;
+  transition: opacity 180ms var(--ease-settle);
+}
+.whisper-overlay.open {
+  opacity: 1;
+}
+
+.whisper-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 9;
+  width: min(420px, 92vw);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, var(--surface-panel) 0%, var(--surface-panel-2) 100%);
+  border-left: 1px solid color-mix(in srgb, var(--gold) 30%, transparent);
+  box-shadow: -20px 0 50px rgba(0, 0, 0, 0.5);
+  transform: translateX(100%);
+  transition: transform 320ms var(--ease-settle);
+}
+.whisper-drawer.open {
+  transform: translateX(0);
+}
+
+.whisper-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.9rem 1rem;
+  background: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--gold) 22%, var(--surface-panel)),
+    color-mix(in srgb, var(--gold) 6%, var(--surface-panel))
+  );
+  border-bottom: 1px solid color-mix(in srgb, var(--gold) 28%, transparent);
+}
+.whisper-portrait {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--ink);
+  background:
+    radial-gradient(120% 100% at 50% 20%, hsl(var(--phue, 30) 45% 38%), transparent 65%),
+    linear-gradient(160deg, hsl(var(--phue, 30) 40% 22%), hsl(calc(var(--phue, 30) + 30) 32% 12%));
+  border: 1px solid var(--speaker, var(--gold));
+}
+.whisper-name {
+  flex: 1;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  color: var(--ink);
+}
+.whisper-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+.whisper-lock .ic {
+  width: 13px;
+  height: 13px;
+}
+.whisper-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-soft);
+  background: var(--surface-panel-2);
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.whisper-close .ic {
+  width: 16px;
+  height: 16px;
+}
+.whisper-close:hover {
+  color: var(--ink);
+}
+
+.pm-thread {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  background: var(--surface-thread);
+}
+.pm-empty {
+  color: var(--ink-muted);
+  font-style: italic;
+  font-size: 0.9rem;
+  text-align: center;
+  margin: auto 0;
+}
+.pm-line {
+  max-width: 80%;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.92rem;
+  animation: inkReveal 360ms var(--ease-rise) both;
+}
+.pm-you {
+  align-self: flex-end;
+  background: color-mix(in srgb, var(--gold) 20%, var(--surface-panel));
+  color: var(--ink);
+  border: 1px solid color-mix(in srgb, var(--gold) 30%, transparent);
+}
+.pm-them {
+  align-self: flex-start;
+  background: var(--surface-panel);
+  border-left: 3px solid var(--gold);
+}
+
+.pm-form {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.7rem;
+  border-top: 1px solid var(--line-soft);
+}
+.pm-input {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-body);
+  font-size: 0.92rem;
+  color: var(--ink);
+  background: var(--surface-panel-2);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  padding: 0.55rem 0.7rem;
+  outline: none;
+}
+.pm-input:focus {
+  border-color: var(--gold);
+}
+.pm-send {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(to bottom, var(--gold), var(--accent-2));
+  color: var(--ink-inverse);
+  cursor: pointer;
+}
+.pm-send .ic {
+  width: 17px;
+  height: 17px;
+}
+
+/* -------------------------------------------------------------------------
+   FOCUS - a visible hot white-gold ring on every interactive element
+   ------------------------------------------------------------------------- */
+:where(button, [contenteditable], input, [role="textbox"]):focus-visible {
+  outline: 2px solid var(--highlight);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* -------------------------------------------------------------------------
+   RESPONSIVE - tablet retune (outside the 640 adapter)
+   ------------------------------------------------------------------------- */
+@media (max-width: 900px) {
+  .play-body {
+    grid-template-columns: 1fr clamp(170px, 26vw, 220px);
+  }
+}
+
+/* =========================================================================
+   THE ONE ADDITIVE MOBILE ADAPTER (<= 640px). All phone fixes live here.
+   ========================================================================= */
 @media (max-width: 640px) {
-  #root {
-    justify-content: flex-start;
-    padding-top: 3rem;
+  .play-deck {
+    grid-template-columns: 1fr;
     gap: 0.5rem;
+    justify-items: stretch;
+  }
+  .deck-logo,
+  .deck-scene,
+  .deck-vitals {
+    justify-self: center;
+  }
+  .deck-vitals {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .deck-scene {
+    max-width: 92vw;
   }
 
-  h1 {
-    font-size: 2rem;
+  /* the cast rail is NOT a side column on mobile: stack it under the story.
+     The story keeps a guaranteed reading window; the page scrolls before it
+     shrinks. */
+  .play-body {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+    min-height: 0;
+  }
+  .story {
+    min-height: 42vh;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .char-column {
+    overflow: visible;
+  }
+  /* the cast becomes a horizontally swipeable shelf of portrait plates */
+  .char-deck {
+    flex-direction: row;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    gap: 0.7rem;
+    padding-bottom: 0.4rem;
+  }
+  .char-col {
+    flex: 0 0 132px;
+    scroll-snap-align: start;
+  }
+
+  .narration p,
+  .beat-line {
+    font-size: 1.08rem;
+  }
+  .narration.scene-open > .beat-line:first-of-type::first-letter {
+    font-size: 2.6em;
+  }
+
+  /* the composer wraps gracefully on a 375px screen */
+  .composer {
+    flex-wrap: wrap;
+  }
+  .composer-modes {
+    width: 100%;
+    justify-content: center;
+  }
+  .composer-input {
+    flex: 1 1 100%;
+    order: 1;
+  }
+  .system-badge {
+    max-width: 100%;
+  }
+  .bubble {
+    min-width: 0;
+  }
+
+  /* choice keys keep >=44px tap targets and scroll if they overflow */
+  .choices-row {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+  }
+  .choice-key {
+    flex: 0 0 auto;
+  }
+  /* the carry strip scrolls horizontally rather than wrapping tall on a phone */
+  .slot-grid {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+  }
+  .item-chip {
+    flex: 0 0 auto;
+  }
+
+  /* the whisper drawer becomes a near-full-screen bottom sheet */
+  .whisper-drawer {
+    top: auto;
+    bottom: 0;
+    right: 0;
+    left: 0;
+    width: 100%;
+    height: 90vh;
+    border-left: 0;
+    border-top: 1px solid color-mix(in srgb, var(--gold) 30%, transparent);
+    border-radius: var(--radius) var(--radius) 0 0;
+    transform: translateY(100%);
+  }
+  .whisper-drawer.open {
+    transform: translateY(0);
+  }
+
+  /* safe-area inset on the action bar */
+  .play-actionbar {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom));
+  }
+}
+
+/* =========================================================================
+   THE SINGLE REDUCED-MOTION GUARD - neutralizes all animation/transition.
+   Content still arrives, just static.
+   ========================================================================= */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
   }
 }
