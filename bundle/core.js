@@ -17,3 +17,30 @@ export async function askAnna(runtime, text) {
   });
   return reply.content.text;
 }
+
+// Storage primitives for persisting game state. We use the portable
+// `runtime.call("storage", method, argsObject)` shape, which behaves
+// identically in the test harness and in the production SDK (where
+// anna.storage.<method>(argsObject) forwards the object verbatim). Do NOT use
+// `runtime.storage.get(key)` positional form: that exists only in the harness.
+
+/**
+ * Save a JSON-serializable value under key. Returns the host result.
+ * @param {{ call: (ns: string, method: string, args: object) => Promise<any> }} runtime
+ * @param {string} key
+ * @param {*} value
+ * @returns {Promise<any>}
+ */
+export async function saveState(runtime, key, value) {
+  return runtime.call("storage", "set", { key, value });
+}
+
+/**
+ * Load the value stored under key, or null if absent.
+ * @param {{ call: (ns: string, method: string, args: object) => Promise<any> }} runtime
+ * @param {string} key
+ * @returns {Promise<*>}
+ */
+export async function loadState(runtime, key) {
+  return runtime.call("storage", "get", { key });
+}
