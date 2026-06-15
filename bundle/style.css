@@ -86,7 +86,8 @@ button {
 }
 
 #root,
-.emberlight-root {
+.emberlight-root,
+.home-root {
   height: 100%;
   min-height: 0;
 }
@@ -104,6 +105,290 @@ button {
   width: 1rem;
   height: 1rem;
   flex: 0 0 auto;
+}
+
+/* Home -------------------------------------------------------------------- */
+
+.home-shell {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 1rem;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.home-bg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.96;
+}
+
+.home-bg svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  filter: saturate(1.12) contrast(1.08);
+}
+
+.home-shell::before,
+.home-shell::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.home-shell::before {
+  background:
+    linear-gradient(180deg, rgba(4, 6, 11, 0.72), rgba(4, 6, 11, 0.9)),
+    linear-gradient(90deg, rgba(73, 230, 255, 0.12), transparent 45%, rgba(183, 255, 109, 0.08));
+}
+
+.home-shell::after {
+  opacity: 0.24;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, transparent, #000 16%, #000 86%, transparent);
+}
+
+.home-hero,
+.home-main {
+  position: relative;
+  z-index: 2;
+}
+
+.home-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.home-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.58rem;
+}
+
+.primary-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.42rem;
+  min-height: 44px;
+  padding: 0 0.9rem;
+  overflow: hidden;
+  color: var(--ink-inverse);
+  background: linear-gradient(135deg, var(--cyan), var(--lime));
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: 0 0 28px rgba(73, 230, 255, 0.22);
+  cursor: pointer;
+  font-weight: 760;
+  transition:
+    transform 160ms var(--ease-settle),
+    filter 160ms var(--ease-settle);
+}
+
+.primary-action:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.primary-action:active {
+  transform: translateY(1px);
+}
+
+.home-main {
+  width: min(1120px, 100%);
+  min-height: 0;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(260px, 0.78fr) minmax(320px, 1fr);
+  align-items: center;
+  gap: clamp(1rem, 4vw, 3rem);
+  padding: clamp(1rem, 6vh, 4rem) 0;
+}
+
+.home-copy {
+  min-width: 0;
+}
+
+.home-kicker {
+  display: inline-block;
+  color: var(--cyan);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.home-copy h1 {
+  margin: 0.35rem 0 0.7rem;
+  color: var(--ink);
+  font-size: clamp(2.2rem, 7vw, 5.4rem);
+  line-height: 0.96;
+  letter-spacing: 0;
+}
+
+.home-copy p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: clamp(1rem, 1.6vw, 1.18rem);
+}
+
+.adventure-panel {
+  min-width: 0;
+  max-height: min(66vh, 620px);
+  overflow-y: auto;
+  padding-right: 0.25rem;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(73, 230, 255, 0.32) transparent;
+}
+
+.adventure-list {
+  display: grid;
+  gap: 0.72rem;
+}
+
+.adventure-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: stretch;
+  animation: cardArrive 520ms var(--ease-pop) both;
+}
+
+.adventure-open,
+.adventure-delete {
+  color: var(--ink);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.adventure-open {
+  position: relative;
+  min-width: 0;
+  min-height: 78px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-content: center;
+  gap: 0.16rem 0.7rem;
+  padding: 0.82rem 0.9rem;
+  text-align: left;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(73, 230, 255, 0.14), transparent 36%),
+    rgba(255, 255, 255, 0.075);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-tight);
+  transition:
+    transform 160ms var(--ease-settle),
+    border-color 160ms var(--ease-settle),
+    background 160ms var(--ease-settle);
+}
+
+.adventure-open:hover {
+  transform: translateY(-1px);
+  border-color: rgba(73, 230, 255, 0.46);
+  background:
+    linear-gradient(135deg, rgba(73, 230, 255, 0.2), transparent 40%),
+    rgba(255, 255, 255, 0.09);
+}
+
+.adventure-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 1rem;
+  font-weight: 790;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adventure-meta {
+  color: var(--ink-muted);
+  font-size: 0.82rem;
+}
+
+.adventure-arrow {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  align-self: center;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  color: var(--lime);
+  background: rgba(183, 255, 109, 0.1);
+  border-radius: var(--radius-sm);
+}
+
+.adventure-delete {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  min-height: 78px;
+  color: var(--rose);
+  background: rgba(255, 93, 134, 0.08);
+  border: 1px solid rgba(255, 93, 134, 0.24);
+  transition:
+    transform 160ms var(--ease-settle),
+    background 160ms var(--ease-settle),
+    border-color 160ms var(--ease-settle);
+}
+
+.adventure-delete:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 93, 134, 0.15);
+  border-color: rgba(255, 93, 134, 0.44);
+}
+
+.home-empty {
+  display: grid;
+  place-items: center;
+  min-height: 310px;
+  padding: 2rem;
+  text-align: center;
+  color: var(--ink-muted);
+  background:
+    linear-gradient(135deg, rgba(73, 230, 255, 0.1), transparent 40%),
+    rgba(255, 255, 255, 0.065);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+
+.empty-sigil {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  margin-bottom: 0.75rem;
+  color: var(--lime);
+  background: rgba(183, 255, 109, 0.1);
+  border-radius: var(--radius);
+}
+
+.home-empty h2 {
+  margin: 0 0 0.25rem;
+  color: var(--ink);
+  font-size: 1.2rem;
+}
+
+.home-empty p {
+  margin: 0;
 }
 
 /* Stage ------------------------------------------------------------------- */
@@ -239,6 +524,32 @@ button {
   align-items: center;
   gap: 0.55rem;
   min-width: 0;
+}
+
+.deck-home {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  color: var(--ink-muted);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition:
+    color 160ms var(--ease-settle),
+    background 160ms var(--ease-settle),
+    border-color 160ms var(--ease-settle);
+}
+
+.deck-home[hidden] {
+  display: none;
+}
+
+.deck-home:hover {
+  color: var(--cyan);
+  background: rgba(73, 230, 255, 0.1);
+  border-color: rgba(73, 230, 255, 0.36);
 }
 
 .logo-mark {
@@ -1497,6 +1808,36 @@ button {
   background: linear-gradient(135deg, var(--amber), var(--rose));
 }
 
+/* Creator mode ------------------------------------------------------------ */
+
+.play-stage.creator-mode .deck-scene {
+  background:
+    linear-gradient(135deg, rgba(255, 209, 102, 0.14), transparent 34%),
+    linear-gradient(315deg, rgba(255, 93, 134, 0.11), transparent 38%),
+    var(--panel);
+  border-color: rgba(255, 209, 102, 0.28);
+}
+
+.play-stage.creator-mode .scene-kicker,
+.play-stage.creator-mode .narration::before {
+  color: var(--amber);
+}
+
+.play-stage.creator-mode .narration {
+  border-left-color: rgba(255, 209, 102, 0.36);
+}
+
+.play-stage.creator-mode .narration::before {
+  background: linear-gradient(var(--amber), var(--rose));
+  box-shadow: 0 0 20px rgba(255, 209, 102, 0.24);
+}
+
+.play-stage.creator-mode .choice-key {
+  background:
+    linear-gradient(135deg, rgba(255, 209, 102, 0.14), transparent 44%),
+    rgba(255, 255, 255, 0.07);
+}
+
 /* Focus ------------------------------------------------------------------- */
 
 :where(button, [contenteditable], input, [role="textbox"]):focus-visible {
@@ -1507,6 +1848,20 @@ button {
 /* Responsive -------------------------------------------------------------- */
 
 @media (max-width: 960px) {
+  .home-main {
+    grid-template-columns: 1fr;
+    align-content: center;
+    gap: 1.5rem;
+  }
+
+  .home-copy {
+    text-align: center;
+  }
+
+  .home-copy p {
+    margin-inline: auto;
+  }
+
   .play-deck {
     grid-template-columns: 1fr;
     justify-items: stretch;
@@ -1537,6 +1892,55 @@ button {
 @media (max-width: 720px) {
   body {
     overflow: hidden;
+  }
+
+  .home-shell {
+    padding: 0.75rem;
+  }
+
+  .home-hero {
+    align-items: stretch;
+  }
+
+  .home-brand {
+    min-width: 0;
+  }
+
+  .new-adventure {
+    min-width: 44px;
+    padding-inline: 0.72rem;
+  }
+
+  .home-main {
+    align-items: start;
+    overflow-y: auto;
+    padding: 2rem 0 0.25rem;
+  }
+
+  .home-copy {
+    text-align: left;
+  }
+
+  .home-copy h1 {
+    font-size: clamp(2.25rem, 15vw, 4rem);
+  }
+
+  .home-copy p {
+    margin-inline: 0;
+  }
+
+  .adventure-panel {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .adventure-card {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .adventure-open,
+  .adventure-delete {
+    min-height: 68px;
   }
 
   .play-stage {
@@ -1692,6 +2096,18 @@ button {
 }
 
 @media (max-width: 390px) {
+  .home-hero {
+    gap: 0.6rem;
+  }
+
+  .new-adventure span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
   .deck-scene {
     grid-template-columns: minmax(0, 1fr);
   }

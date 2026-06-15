@@ -16,6 +16,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   renderTurn,
+  renderHome,
   setSceneImage,
   setPortrait,
   pushWhisperReply,
@@ -280,5 +281,79 @@ describe("generated media contract", () => {
 
     expect(root.querySelector(".whisper-drawer").hasAttribute("hidden")).toBe(false);
     expect(root.querySelector(".pm-them").textContent).toContain("The path east is listening.");
+  });
+});
+
+// --- Home / creator flow contract -----------------------------------------
+
+describe("home and creator flow contract", () => {
+  it("renderHome lists adventures and wires new/resume/delete handlers", () => {
+    const calls = [];
+    renderHome(
+      root,
+      [
+        { id: "old", title: "Older World", updatedAt: Date.UTC(2026, 0, 1) },
+        { id: "new", title: "Newest World", updatedAt: Date.UTC(2026, 5, 1) },
+      ],
+      {
+        onNewAdventure: () => calls.push(["new"]),
+        onResume: (id) => calls.push(["resume", id]),
+        onDelete: (id) => calls.push(["delete", id]),
+      },
+    );
+
+    expect(root.querySelector(".home-root, .home-shell")).toBeTruthy();
+    expect(root.textContent).toContain("Choose a world");
+    expect(root.textContent).toContain("Newest World");
+    expect(root.textContent).toContain("Older World");
+
+    root.querySelector("[data-new]").click();
+    root.querySelector('[data-resume="new"]').click();
+    root.querySelector('[data-delete="old"]').click();
+
+    expect(calls).toEqual([["new"], ["resume", "new"], ["delete", "old"]]);
+  });
+
+  it("renderHome is tolerant and shows an empty state for weak adventure lists", () => {
+    expect(() => renderHome(root, "not an array", {})).not.toThrow();
+    expect(root.querySelector(".home-empty")).toBeTruthy();
+    expect(root.textContent).toContain("No saved adventures yet");
+  });
+
+  it("switches cleanly from home back to play on the same root", () => {
+    renderHome(root, [{ id: "a", title: "Archive", updatedAt: Date.now() }], {});
+    renderTurn(root, SAMPLE, {});
+
+    expect(root.querySelector(".play-stage")).toBeTruthy();
+    expect(root.querySelector(".home-shell")).toBeFalsy();
+    expect(root.textContent).toContain("You awaken");
+  });
+
+  it("shows the play home affordance only when onHome is provided and calls it", () => {
+    let called = 0;
+    renderTurn(root, SAMPLE, { onHome: () => called++ });
+
+    const btn = root.querySelector("[data-home]");
+    expect(btn).toBeTruthy();
+    expect(btn.hidden).toBe(false);
+    btn.click();
+    expect(called).toBe(1);
+  });
+
+  it("supports creator mode through renderTurn opts", () => {
+    renderTurn(
+      root,
+      {
+        scene: { text: "First, choose the shape of your world." },
+        characters: [],
+        inventory: [],
+        choices: ["Begin the adventure"],
+      },
+      {},
+      { mode: "creator" },
+    );
+
+    expect(root.querySelector(".play-stage").classList.contains("creator-mode")).toBe(true);
+    expect(root.querySelector("[data-scene-kicker]").textContent).toBe("World builder");
   });
 });

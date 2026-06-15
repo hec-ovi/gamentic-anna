@@ -153,55 +153,62 @@ function rng(seed) {
   };
 }
 
-// The HERO BACKDROP for a scene: layered neon gradients + an inline-SVG
-// horizon silhouette seeded from image_prompt text. Good enough that a mock
-// turn reads as an atmospheric concept frame, never a gray box.
+// The HERO BACKDROP fallback: abstract cinematic light architecture seeded from
+// the scene prompt. It avoids the old crude forest/mountain silhouette and keeps
+// preview mode polished until real scene art arrives from the backend.
 export function sceneBackdrop(imagePrompt) {
-  const seed = hashStr(imagePrompt || "ember");
+  const seed = hashStr(imagePrompt || "gamentic");
   const rand = rng(seed);
-  // pick a mood tint pair off the ember/night ramp, nudged by the seed
-  const baseHue = 18 + (seed % 30); // warm amber-orange band
-  const farHue = 200 + (seed % 40); // cool misty band for depth
   const w = 1200;
   const h = 800;
 
-  // a layered treeline: several rows of jagged silhouettes receding into mist
-  let layers = "";
-  const rows = 3;
-  for (let r = 0; r < rows; r++) {
-    const baseY = h * (0.5 + r * 0.16);
-    const darkness = 0.22 + r * 0.26;
-    const step = 70 - r * 8;
-    let d = `M0 ${h} L0 ${baseY.toFixed(0)}`;
-    for (let x = 0; x <= w; x += step) {
-      const peak = baseY - (40 + rand() * 130) * (1 - r * 0.18);
-      d += ` L${x} ${peak.toFixed(0)} L${(x + step / 2).toFixed(0)} ${baseY.toFixed(0)}`;
-    }
-    d += ` L${w} ${baseY.toFixed(0)} L${w} ${h} Z`;
-    layers += `<path d="${d}" fill="hsl(${(farHue + r * 6) % 360} 30% ${(6 + r * 3).toFixed(0)}%)" opacity="${darkness.toFixed(2)}"/>`;
+  const palettes = [
+    { a: "#49e6ff", b: "#b7ff6d", c: "#ffd166", d: "#ff5d86", base: "#05080f" },
+    { a: "#57f2c6", b: "#9f8bff", c: "#ffd166", d: "#49e6ff", base: "#05070d" },
+    { a: "#ff5d86", b: "#49e6ff", c: "#b7ff6d", d: "#ffd166", base: "#07070d" },
+  ][seed % 3];
+
+  let ribbons = "";
+  for (let i = 0; i < 5; i++) {
+    const y = 190 + rand() * 360;
+    const lift = 80 + rand() * 180;
+    const drift = (rand() - 0.5) * 160;
+    const width = 10 + rand() * 24;
+    const color = [palettes.a, palettes.b, palettes.c, palettes.d][i % 4];
+    const opacity = (0.12 + rand() * 0.18).toFixed(2);
+    ribbons += `<path d="M-80 ${y.toFixed(0)} C ${(220 + drift).toFixed(0)} ${(y - lift).toFixed(0)}, ${(480 - drift).toFixed(0)} ${(y + lift * 0.42).toFixed(0)}, ${(760 + drift).toFixed(0)} ${(y - lift * 0.26).toFixed(0)} S ${(1060 - drift).toFixed(0)} ${(y + lift * 0.34).toFixed(0)}, 1280 ${(y - lift * 0.16).toFixed(0)}" fill="none" stroke="${color}" stroke-width="${width.toFixed(1)}" stroke-linecap="round" opacity="${opacity}"/>`;
   }
 
-  // a low warm glow disc (firelight / sun just out of frame), offset by seed
-  const gx = (20 + (seed % 60)).toFixed(0);
-  const gy = (28 + ((seed >> 3) % 30)).toFixed(0);
+  let facets = "";
+  for (let i = 0; i < 8; i++) {
+    const x = 70 + i * 150 + (rand() - 0.5) * 42;
+    const y = 150 + rand() * 420;
+    const s = 90 + rand() * 180;
+    const color = [palettes.a, palettes.b, palettes.c, palettes.d][(i + 1) % 4];
+    facets += `<path d="M${x.toFixed(0)} ${y.toFixed(0)} l${(s * 0.74).toFixed(0)} ${(s * 0.2).toFixed(0)} l${(-s * 0.18).toFixed(0)} ${(s * 0.56).toFixed(0)} l${(-s * 0.78).toFixed(0)} ${(-s * 0.08).toFixed(0)} Z" fill="none" stroke="${color}" stroke-width="1.1" opacity="0.12"/>`;
+  }
 
   const svg = `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid slice" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
       <defs>
-        <radialGradient id="g-glow" cx="${gx}%" cy="${gy}%" r="75%">
-          <stop offset="0%" stop-color="hsl(${baseHue} 80% 58%)" stop-opacity="0.55"/>
-          <stop offset="38%" stop-color="hsl(${(baseHue + 14) % 360} 60% 34%)" stop-opacity="0.32"/>
-          <stop offset="100%" stop-color="hsl(${farHue} 38% 7%)" stop-opacity="0.95"/>
-        </radialGradient>
-        <linearGradient id="g-sky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="hsl(${(baseHue + 6) % 360} 46% 22%)"/>
-          <stop offset="52%" stop-color="hsl(${(farHue + 10) % 360} 34% 11%)"/>
-          <stop offset="100%" stop-color="hsl(${farHue} 40% 5%)"/>
+        <linearGradient id="g-bg" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stop-color="${palettes.base}"/>
+          <stop offset="42%" stop-color="#0b1020"/>
+          <stop offset="100%" stop-color="#04050a"/>
         </linearGradient>
+        <radialGradient id="g-wash" cx="${(26 + (seed % 48)).toFixed(0)}%" cy="${(24 + ((seed >> 4) % 36)).toFixed(0)}%" r="72%">
+          <stop offset="0%" stop-color="${palettes.a}" stop-opacity="0.22"/>
+          <stop offset="36%" stop-color="${palettes.c}" stop-opacity="0.1"/>
+          <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+        </radialGradient>
+        <filter id="soften"><feGaussianBlur stdDeviation="10"/></filter>
       </defs>
-      <rect width="${w}" height="${h}" fill="url(#g-sky)"/>
-      <rect width="${w}" height="${h}" fill="url(#g-glow)"/>
-      ${layers}
-      <rect width="${w}" height="${h}" fill="hsl(${farHue} 40% 4%)" opacity="0.12"/>
+      <rect width="${w}" height="${h}" fill="url(#g-bg)"/>
+      <rect width="${w}" height="${h}" fill="url(#g-wash)"/>
+      <g filter="url(#soften)">${ribbons}</g>
+      <g>${facets}</g>
+      <path d="M0 610 C220 540 360 660 560 585 S930 520 1200 620 V800 H0 Z" fill="#03050a" opacity="0.72"/>
+      <path d="M0 612 C220 540 360 660 560 585 S930 520 1200 620" fill="none" stroke="${palettes.a}" stroke-width="1.4" opacity="0.34"/>
+      <rect width="${w}" height="${h}" fill="none" stroke="${palettes.b}" stroke-width="1" opacity="0.08"/>
     </svg>`;
 
   return svg;
@@ -248,6 +255,7 @@ const STAGE = new WeakMap();
 
 function buildStage(root, handlers) {
   root.innerHTML = "";
+  root.classList.remove("home-root");
   root.classList.add("emberlight-root");
 
   const stage = el("div", "play-stage");
@@ -300,8 +308,10 @@ function buildStage(root, handlers) {
     activeArt: artA,
     deck,
     sceneName: deck.querySelector("[data-scene-name]"),
+    sceneKicker: deck.querySelector("[data-scene-kicker]"),
     timeChip: deck.querySelector("[data-time-chip]"),
     location: deck.querySelector("[data-location]"),
+    homeBtn: deck.querySelector("[data-home]"),
     ctxFill: deck.querySelector("[data-ctx-fill]"),
     ctxNum: deck.querySelector("[data-ctx-num]"),
     ribbon: deck.querySelector(".bookmark"),
@@ -323,7 +333,9 @@ function buildStage(root, handlers) {
     characterDetails: new Map(),
   };
 
+  wireDeck(refs);
   wireActionBar(refs);
+  updateHomeAffordance(refs);
   STAGE.set(root, refs);
   return refs;
 }
@@ -343,6 +355,7 @@ function glyph(name) {
     heart: '<path d="M12 20s-7-4.3-9.3-8.5C1.2 8.3 2.6 5 5.8 5 8 5 9.5 6.6 12 9c2.5-2.4 4-4 6.2-4 3.2 0 4.6 3.3 3.1 6.5C19 15.7 12 20 12 20Z"/>',
     compass: '<circle cx="12" cy="12" r="9"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    home: '<path d="M4 11.5 12 5l8 6.5"/><path d="M6.5 10.5V20h11v-9.5"/><path d="M10 20v-5h4v5"/>',
     send: '<path d="M4 12 20 4l-6 16-3-7-7-1Z"/>',
     at: '<circle cx="12" cy="12" r="4"/><path d="M16 12v1.5a2.5 2.5 0 0 0 5 0V12a9 9 0 1 0-3.5 7.1"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
@@ -350,6 +363,7 @@ function glyph(name) {
     mic: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
     x: '<path d="M6 6l12 12M18 6 6 18"/>',
     chevR: '<path d="m9 5 7 7-7 7"/>',
+    trash: '<path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 14h10l1-14"/><path d="M9 7V4h6v3"/>',
     // inventory vocabulary
     key: '<circle cx="8" cy="8" r="4"/><path d="m11 11 8 8M16 16l2-2M18 18l2-2"/>',
     scroll: '<path d="M7 4h10v13a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V4Z"/><path d="M7 4a3 3 0 0 0-3 3M17 17h3a0 0 0 0 1 0 0 3 3 0 0 1-3 3"/><path d="M8 8h6M8 11h6"/>',
@@ -369,13 +383,14 @@ function buildDeck() {
   const deck = el("header", "play-deck");
   deck.innerHTML = `
     <div class="deck-logo">
+      <button type="button" class="deck-home" data-home aria-label="Open adventure menu" title="Adventure menu">${glyph("home")}</button>
       <span class="logo-mark">Gamentic</span>
       <span class="logo-pulse" aria-hidden="true"></span>
     </div>
     <div class="deck-scene">
       <span class="scene-fold" aria-hidden="true"></span>
       <div class="scene-id">
-        <span class="scene-kicker">Current scene</span>
+        <span class="scene-kicker" data-scene-kicker>Current scene</span>
         <h2 class="scene-name"><span data-scene-name>An untold place</span></h2>
       </div>
       <span class="time-chip" data-time-chip title="Current story turn">${glyph("clock")}<span>Turn 01</span></span>
@@ -390,6 +405,17 @@ function buildDeck() {
       <span class="vital location" title="Scene signal">${glyph("compass")}<span data-location>Unknown</span></span>
     </div>`;
   return deck;
+}
+
+function wireDeck(refs) {
+  refs.homeBtn.addEventListener("click", () => {
+    if (refs.stage.classList.contains("generating")) return;
+    if (typeof refs.handlers.onHome === "function") refs.handlers.onHome();
+  });
+}
+
+function updateHomeAffordance(refs) {
+  refs.homeBtn.hidden = typeof refs.handlers.onHome !== "function";
 }
 
 // THE ACTION BAR: choices row above the free-text composer; the player
@@ -606,20 +632,24 @@ function renderWhisperHistory(w, name) {
  * @param {{ onChoice?:(text:string)=>void, onSubmit?:(text:string)=>void, onWhisper?:(name:string,msg:string)=>void }} [handlers]
  * @returns {HTMLElement} root
  */
-export function renderTurn(root, state, handlers = {}) {
+export function renderTurn(root, state, handlers = {}, opts = {}) {
   let refs = STAGE.get(root);
-  if (!refs) {
+  if (!refs || !root.contains(refs.stage)) {
     refs = buildStage(root, handlers);
-  } else if (handlers && (handlers.onChoice || handlers.onSubmit || handlers.onWhisper)) {
+  } else if (handlers && (handlers.onChoice || handlers.onSubmit || handlers.onWhisper || handlers.onHome)) {
     // allow handlers to be (re)bound on a later call
     refs.handlers = Object.assign(refs.handlers, handlers);
+    updateHomeAffordance(refs);
   }
 
   const s = normalizeState(state);
+  const mode = opts && opts.mode === "creator" ? "creator" : "play";
+  refs.stage.classList.toggle("creator-mode", mode === "creator");
+  refs.stage.setAttribute("data-mode", mode);
   refs.turnCount += 1;
 
   appendNarration(refs, s.scene.text, refs.turnCount === 1);
-  updateDeck(refs, s);
+  updateDeck(refs, s, mode);
   setBackdrop(refs, s.scene);
   renderCast(refs, s.characters);
   renderInventory(refs, s.inventory);
@@ -669,8 +699,9 @@ function sceneLabel(scene) {
   return compactLabel(scene.image_prompt || splitParas(scene.text)[0], "Unmapped signal");
 }
 
-function updateDeck(refs, state) {
+function updateDeck(refs, state, mode = "play") {
   const label = sceneLabel(state.scene);
+  refs.sceneKicker.textContent = mode === "creator" ? "World builder" : "Current scene";
   refs.sceneName.textContent = label;
   if (refs.location) refs.location.textContent = compactLabel(label, "Unknown");
 
@@ -894,4 +925,130 @@ function findCharacterCard(refs, name) {
   return [...refs.charDeck.querySelectorAll(".char-col")].find(
     (card) => card.getAttribute("data-char-name") === name,
   );
+}
+
+export function renderHome(root, adventures, handlers = {}) {
+  STAGE.delete(root);
+  root.innerHTML = "";
+  root.classList.remove("emberlight-root");
+  root.classList.add("home-root");
+  root.setAttribute("aria-label", "Gamentic adventures");
+
+  try {
+    const list = normalizeAdventures(adventures);
+    const cards = list
+      .map(
+        (a) => `
+          <article class="adventure-card" data-adventure-id="${escapeHtml(a.id)}">
+            <button type="button" class="adventure-open" data-resume="${escapeHtml(a.id)}" aria-label="Resume ${escapeHtml(a.title)}">
+              <span class="adventure-title">${escapeHtml(a.title)}</span>
+              <span class="adventure-meta">${escapeHtml(formatUpdated(a.updatedAt))}</span>
+              <span class="adventure-arrow" aria-hidden="true">${glyph("chevR")}</span>
+            </button>
+            <button type="button" class="adventure-delete" data-delete="${escapeHtml(a.id)}" aria-label="Delete ${escapeHtml(a.title)}" title="Delete adventure">
+              ${glyph("trash")}
+            </button>
+          </article>`,
+      )
+      .join("");
+
+    root.innerHTML = `
+      <section class="home-shell">
+        <div class="home-bg" aria-hidden="true">${sceneBackdrop("gamentic adventure archive neural aurora")}</div>
+        <header class="home-hero">
+          <div class="home-brand">
+            <span class="logo-mark">Gamentic</span>
+            <span class="logo-pulse" aria-hidden="true"></span>
+          </div>
+          <button type="button" class="new-adventure primary-action" data-new>${glyph("plus")}<span>New Adventure</span></button>
+        </header>
+        <main class="home-main">
+          <section class="home-copy" aria-labelledby="homeTitle">
+            <span class="home-kicker">Adventure archive</span>
+            <h1 id="homeTitle">Choose a world</h1>
+            <p>Resume an existing story or start shaping a new one.</p>
+          </section>
+          <section class="adventure-panel" aria-label="Saved adventures">
+            ${
+              list.length
+                ? `<div class="adventure-list">${cards}</div>`
+                : `<div class="home-empty">
+                    <span class="empty-sigil" aria-hidden="true">${glyph("star")}</span>
+                    <h2>No saved adventures yet</h2>
+                    <p>Start with a premise, a mood, or a single strange detail.</p>
+                  </div>`
+            }
+          </section>
+        </main>
+      </section>`;
+
+    wireHome(root, handlers);
+  } catch (e) {
+    root.innerHTML = `
+      <section class="home-shell fallback-home">
+        <button type="button" class="new-adventure primary-action" data-new>${glyph("plus")}<span>New Adventure</span></button>
+      </section>`;
+    wireHome(root, handlers);
+  }
+
+  return root;
+}
+
+function wireHome(root, handlers) {
+  const newBtn = root.querySelector("[data-new]");
+  if (newBtn) {
+    newBtn.addEventListener("click", () => {
+      if (typeof handlers.onNewAdventure === "function") handlers.onNewAdventure();
+    });
+  }
+
+  root.querySelectorAll("[data-resume]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = btn.getAttribute("data-resume");
+      if (typeof handlers.onResume === "function") handlers.onResume(id);
+    });
+  });
+
+  root.querySelectorAll("[data-delete]").forEach((btn) => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const id = btn.getAttribute("data-delete");
+      if (typeof handlers.onDelete === "function") handlers.onDelete(id);
+    });
+  });
+}
+
+function normalizeAdventures(adventures) {
+  if (!Array.isArray(adventures)) return [];
+  return adventures
+    .filter((a) => a && a.id != null)
+    .map((a) => {
+      const title = String(a.title || "").trim() || "Untitled adventure";
+      return {
+        id: String(a.id),
+        title,
+        updatedAt: normalizeTime(a.updatedAt),
+      };
+    })
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+}
+
+function normalizeTime(v) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const parsed = Date.parse(v);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatUpdated(ms) {
+  if (!ms) return "No saved date";
+  try {
+    return "Updated " + new Intl.DateTimeFormat("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(new Date(ms));
+  } catch {
+    return "Updated recently";
+  }
 }
