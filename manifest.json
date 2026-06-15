@@ -25,7 +25,8 @@
       "storage": ["get", "set", "delete", "list"],
       "image": ["generate"],
       "chat": ["append_artifact"],
-      "window": ["set_title"]
+      "window": ["set_title"],
+      "agent": { "session": { "auto": true } }
     }
   }
 }

@@ -51,3 +51,29 @@ describe("storage primitives", () => {
     expect(manifest.ui.host_api.storage).toEqual(["get", "set", "delete", "list"]);
   });
 });
+
+describe("loadState envelope unwrapping", () => {
+  // Production storage.get returns { value, exists, etag, ... }; the harness
+  // returns the raw value. loadState must yield the stored value in BOTH cases.
+  it("unwraps the production { value, exists, etag } envelope", async () => {
+    const stored = { scene: { text: "hi" }, history: [{ narration: "hi" }] };
+    const runtime = { call: async () => ({ key: "game", value: stored, exists: true, etag: "abc", generation: 1 }) };
+    expect(await loadState(runtime, "game")).toEqual(stored);
+  });
+
+  it("returns null for a production miss { value:null, exists:false }", async () => {
+    const runtime = { call: async () => ({ value: null, exists: false }) };
+    expect(await loadState(runtime, "game")).toBeNull();
+  });
+
+  it("passes a raw harness value through unchanged", async () => {
+    const stored = { scene: { text: "hi" } };
+    const runtime = { call: async () => stored };
+    expect(await loadState(runtime, "game")).toEqual(stored);
+  });
+
+  it("returns null when the harness returns null", async () => {
+    const runtime = { call: async () => null };
+    expect(await loadState(runtime, "game")).toBeNull();
+  });
+});
