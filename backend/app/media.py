@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
+from . import hostbridge
 from .config import settings
 from .providers import base as providers
 from .providers import image as image_providers
@@ -143,7 +144,13 @@ _RENDER_GATE = threading.Lock()
 
 
 def _provider() -> image_providers.ImageProvider:
-    return image_providers.get_provider(providers.resolve("image"))
+    cfg = providers.resolve("image")
+    # Native Anna path: route image generation through the executa's reverse-RPC to
+    # the host (no HTTP image service). Falls through to the configured provider
+    # (comfy / openai / ...) outside an executa.
+    if hostbridge.active():
+        return image_providers.AnnaImageProvider(cfg)
+    return image_providers.get_provider(cfg)
 
 
 def generate_character_images(descriptor: str, style: str = "", seed: int | None = None) -> dict | None:

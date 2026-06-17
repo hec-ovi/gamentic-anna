@@ -2,65 +2,63 @@
 
 Gamentic is an AI driven text adventure: you create a world, then play it turn by
 turn with a narrator, characters you can talk to (and whisper to), an inventory,
-scenes, and quests. This repo runs the whole thing as a real Anna App, inside a
-single Docker container, with Anna's own agent providing the text and the images.
-No GPU.
+scenes, quests, and generated scene art. This repo runs the whole thing as a
+**native Anna App**: the model and images come from Anna's own host, with nothing
+of ours in between. No GPU.
+
+## The hackathon goal
+
+Run Gamentic on Anna's stack natively. A user who already has Anna installed
+installs this app and it just works, using only Anna's runtime, an executa, and an
+iframe UI. There is **no third-party bridge and no bundled model server**: the
+executa asks the Anna host directly for LLM text and images, and Anna owns model
+selection, billing and quota. The original Gamentic engine and UI are kept intact;
+only the communication layers are swapped to Anna's own.
 
 ## How it works
 
-The original Gamentic is a Python engine plus a vanilla JS web UI. Both are kept
-intact here. Only the communication layers are swapped so it lives inside Anna:
-
 - **Backend**: the Gamentic engine (FastAPI) is wrapped as an Anna Executa
-  (`backend/app/executa.py`). The UI calls it over `anna.tools.invoke` instead of
-  HTTP; a thin stdio bridge replays each call against the in-process app, so the
-  engine code is unchanged.
+  (`backend/app/executa.py`). The iframe invokes it over `anna.tools.invoke`; the
+  executa replays each call against the in-process app (httpx ASGI transport), so
+  the engine code is unchanged. For text and images the engine reverse-RPCs the
+  Anna host (`sampling/createMessage`, `image/generate`) through
+  `backend/app/hostbridge.py`, using the vendored `executa_sdk`.
+- **Tool calls**: Anna sampling has no OpenAI style function calling, but it does
+  structured JSON output. So when the engine offers tools, `llm.chat` asks the
+  model for a `{prose, tool_calls}` envelope and parses it back into the same
+  reply the engine already expects (`backend/app/llm.py`). No external repair
+  service.
 - **Frontend**: the Gamentic UI runs in Anna's sandboxed iframe.
-  `frontend/src/api.js` routes through the injected Anna transport when it is
-  present, and falls back to `fetch` for standalone dev. Renderers and controllers
-  are untouched. The layout adapts to the small Anna window.
-- **LLM and images**: the engine calls an OpenAI compatible endpoint
-  (`infra/anna-api`) that translates to the Anna agent's copilot. Text comes from
-  Anna; images use the experimental copilot image path. Voice is off.
-
-Game state persists in embedded SQLite on a Docker volume.
+  `frontend/src/api.js` routes through the injected Anna transport when present and
+  falls back to `fetch` for standalone dev. Renderers and controllers are untouched.
+- **Storage**: game state is embedded SQLite, kept on a Docker volume. Voice is off.
 
 ## Run it
 
-One container holds the whole Anna environment, with three processes under
-supervisord:
-
-| port | process | role |
-| --- | --- | --- |
-| 19001 | the Anna agent | the backend, plus its one time sign in UI |
-| 9100 | anna-api | OpenAI to copilot bridge (internal) |
-| 5180 | anna-app dev | the Anna app runner: Gamentic iframe + the engine Executa |
+One container runs `anna-app dev` (Anna's own dev runtime), which serves the
+Gamentic iframe and spawns the Gamentic executa. Nothing of ours bridges anything.
 
 ```sh
 docker compose up -d --build
+docker exec -it gamentic-anna anna-app login --host https://anna.partners --no-browser
+# complete the device-code once; the token persists on the anna-cred volume
 ```
 
-Then sign in to your Anna account once at http://localhost:19001 (it persists on
-the `anna-data` volume), and play at http://localhost:5180.
-
-- Manage the processes: `docker exec gamentic-anna supervisorctl status`
-- Full teardown, including the sign in and saved games: `docker compose down -v`
-
-### Config
-
-Copy `.env.example` to `.env` to override the defaults (host port, the image path,
-optional headless sign in). The defaults work out of the box.
+Then play at http://localhost:5180. Full teardown (including the login and saved
+games): `docker compose down -v`.
 
 ## Layout
 
 ```
-backend/        Gamentic engine (FastAPI) + app/executa.py (the Anna Executa) + executa.json
-frontend/       Gamentic UI; src/api.js + src/app/anna.js carry the Anna transport
-infra/
-  Dockerfile        the single image: Anna agent + bridge + engine + UI runner
-  supervisord.conf  runs the three processes
-  anna-api/         OpenAI compatible face over the Anna copilot
-manifest.json   the Anna App manifest (iframe view, required executa, host API ACL)
+backend/
+  app/executa.py     the Anna Executa: stdio JSON-RPC + reverse-RPC to the Anna host
+  app/hostbridge.py  the sync engine -> host reverse-RPC bridge (sampling, image)
+  app/llm.py         chat(): native sampling + the {prose, tool_calls} envelope
+  executa.json       executa descriptor (tool_id, command, host_capabilities)
+  executa_sdk/       vendored Anna executa SDK (SamplingClient, ImageClient, ...)
+frontend/            Gamentic UI; src/api.js + src/app/anna.js carry the Anna transport
+infra/Dockerfile     the single image: node + anna-app + the engine venv
+manifest.json        the Anna App manifest (iframe view, required executa, host API ACL)
 docker-compose.yml
 ```
 
@@ -70,17 +68,23 @@ docker-compose.yml
   ```sh
   cd frontend && npm install && npm test
   ```
-- **Backend** (pytest, end to end against the real engine):
+- **Backend** (pytest, end to end against the real engine and the real Executa
+  stdio + reverse-RPC, with the host sampling faked at the boundary):
   ```sh
   cd backend && uv pip install --python .venv -r requirements.txt pytest
   .venv/bin/python -m pytest
   ```
+  `tests/test_executa_native.py` drives a full adventure (create world, scene
+  change, scene item, pickup, give to a character, a character arriving, a whisper)
+  through the live Executa protocol.
 
 ## Notes
 
-- The image base must be Debian trixie (`node:22-trixie-slim`). The Anna agent is a
-  PyInstaller binary linked against glibc 2.38, so older bases (bookworm, glibc
-  2.36) crash on load.
-- The Anna copilot is a chat assistant, not a native function caller, so the bridge
-  repairs slightly malformed tool call JSON (`infra/anna-api/app/wire.py`) and
-  biases the prompt toward emitting the call. Without it, world creation fails.
+- Anna's executa-side sampling caps each call at 8192 tokens and allows a limited
+  number of model calls per invoke, so a turn keeps within that budget.
+- Generated images come back as short lived host URLs; the engine downloads and
+  persists each one per game, then the executa inlines it to the iframe as a data
+  URI (the sandboxed iframe cannot fetch arbitrary URLs).
+- Publishing: the executa is published to Anna's Executa Hub and referenced by the
+  app by `tool_id`; on install, the user's Anna downloads and runs it. This repo is
+  the dev/run setup for that app.

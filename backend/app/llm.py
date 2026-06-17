@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from . import hostbridge
 from .config import settings
 from .providers import base as providers
 
@@ -36,6 +37,11 @@ def chat(
     stop: list[str] | None = None,
     thinking: bool | None = None,
 ) -> LLMReply:
+    # Native Anna path: when running as an Executa, the engine reverse-RPCs the host
+    # LLM directly (no HTTP gateway). Everything outside the executa (tests, plain
+    # uvicorn) falls through to the unchanged HTTP path below.
+    if hostbridge.active():
+        return _anna_chat(messages, tools, tool_choice, temperature, stop)
     # Resolved at call time (env -> default), so a .env change lands on the
     # next compose up with no code involved.
     cfg = providers.resolve("text")
@@ -102,3 +108,130 @@ def chat(
         finish_reason=choice.get("finish_reason", ""),
         usage=data.get("usage") or {},
     )
+
+
+# --- Anna-native path: the engine reverse-RPCs the host LLM (no HTTP gateway) -------
+# Active only when running as an Anna Executa (app.hostbridge installs the channel).
+# Anna sampling has no OpenAI-style function-calling but DOES support structured JSON
+# output, so when tools are offered we ask the model for a {prose, tool_calls} envelope
+# (json_object mode) and parse it into the SAME LLMReply / ToolCall the engine already
+# consumes. Output length is never capped (see the no-output-cap rule); max_tokens is
+# the host's mandatory maximum (hostbridge.MAX_SAMPLING_TOKENS).
+
+
+def _flatten(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        out = []
+        for c in content:
+            if isinstance(c, dict):
+                out.append(c.get("text") or "")
+            elif isinstance(c, str):
+                out.append(c)
+        return "".join(out)
+    return "" if content is None else str(content)
+
+
+def _to_mcp(messages: list[dict]):
+    """OpenAI messages -> (system_prompt, MCP-shaped user/assistant messages)."""
+    sys_parts: list[str] = []
+    mcp: list[dict] = []
+    for m in messages:
+        role, text = m.get("role"), _flatten(m.get("content"))
+        if role == "system":
+            if text:
+                sys_parts.append(text)
+        else:
+            mcp.append({"role": "assistant" if role == "assistant" else "user",
+                        "content": {"type": "text", "text": text}})
+    if not mcp:
+        mcp = [{"role": "user", "content": {"type": "text", "text": ""}}]
+    return ("\n\n".join(sys_parts) or None), mcp
+
+
+def _tools_directive(tools: list[dict]) -> str:
+    lines = ["You can act by calling tools. Available tools:"]
+    for t in tools:
+        fn = t.get("function", t)
+        lines.append(f"- {fn.get('name', '')}: {fn.get('description', '')}")
+        lines.append(f"  arguments JSON schema: {json.dumps(fn.get('parameters', {}), ensure_ascii=False)}")
+    lines.append(
+        'Reply with ONLY a single JSON object, nothing before or after it, of the form: '
+        '{"prose": "<text to show the player, or an empty string>", '
+        '"tool_calls": [{"name": "<tool name>", "arguments": {<arguments matching that tool\'s schema>}}]}.')
+    if len(tools) == 1:
+        name = tools[0].get("function", tools[0]).get("name", "")
+        lines.append(f'You MUST call "{name}" with valid arguments.')
+    else:
+        lines.append('Include a tool call only when it genuinely applies; otherwise use an '
+                     'empty list. Put every player-facing word in "prose".')
+    return "\n".join(lines)
+
+
+def _loads_lenient(text: str):
+    """Parse model JSON tolerantly. Returns a dict or list on success, else {}."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        text = text.strip("`")
+        nl = text.find("\n")
+        if nl != -1:
+            text = text[nl + 1:]
+    try:
+        obj = json.loads(text)
+    except json.JSONDecodeError:
+        try:
+            from json_repair import repair_json
+            obj = json.loads(repair_json(text))
+        except Exception:
+            return {}
+    return obj if isinstance(obj, (dict, list)) else {}
+
+
+def _map_usage(usage) -> dict:
+    usage = usage or {}
+    prompt = usage.get("prompt_tokens", usage.get("inputTokens", 0)) or 0
+    completion = usage.get("completion_tokens", usage.get("outputTokens", 0)) or 0
+    return {"prompt_tokens": prompt, "completion_tokens": completion,
+            "total_tokens": usage.get("total_tokens", prompt + completion)}
+
+
+def _norm_stop(stop_reason) -> str:
+    s = (stop_reason or "").lower()
+    return "length" if s in ("length", "max_tokens", "maxtokens") else (stop_reason or "")
+
+
+def _anna_chat(messages, tools, tool_choice, temperature, stop) -> LLMReply:
+    system_prompt, mcp = _to_mcp(messages)
+    response_format = None
+    if tools:
+        directive = _tools_directive(tools)
+        system_prompt = f"{system_prompt}\n\n{directive}" if system_prompt else directive
+        response_format = {"type": "json_object"}
+    result = hostbridge.sample_sync(
+        messages=mcp, system_prompt=system_prompt, temperature=temperature,
+        stop_sequences=stop or None, response_format=response_format,
+        on_unsupported="json_object" if response_format else None)
+    content = result.get("content") or {}
+    text = content.get("text", "") if isinstance(content, dict) else _flatten(content)
+    usage = _map_usage(result.get("usage"))
+    finish = _norm_stop(result.get("stopReason"))
+    if not tools:
+        return LLMReply(content=(text or "").strip(), finish_reason=finish, usage=usage)
+    parsed = _loads_lenient(text)
+    # accept a bare top-level array as the tool_calls list (a common forced-call shape)
+    obj = {"tool_calls": parsed} if isinstance(parsed, list) else parsed
+    calls: list[ToolCall] = []
+    for tc in obj.get("tool_calls") or []:
+        name = tc.get("name") or ""
+        args = tc.get("arguments")
+        if isinstance(args, str):
+            args = _loads_lenient(args)
+        if name:
+            calls.append(ToolCall(name=name, arguments=args if isinstance(args, dict) else {}))
+    prose = obj.get("prose")
+    if not isinstance(prose, str):
+        # No clean envelope: fall back to the raw text as prose so the engine's own
+        # prose-mark / default-accept handling still drives the turn.
+        prose = "" if obj else (text or "")
+    return LLMReply(content=prose.strip(), tool_calls=calls, finish_reason=finish, usage=usage)

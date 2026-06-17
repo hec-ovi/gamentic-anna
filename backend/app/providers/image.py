@@ -19,6 +19,7 @@ import math
 
 import httpx
 
+from .. import hostbridge
 from .base import ProviderConfig, fal_queue_run
 
 # View prompts for the cloud character_set path. The comfy unit owns its own
@@ -237,6 +238,33 @@ class FalProvider(ImageProvider):
             return None
         first = (result.get("images") or [{}])[0]
         return {"image_url": first["url"]} if first.get("url") else None
+
+
+class AnnaImageProvider(ImageProvider):
+    """Reverse-RPC image generation via the Anna host (executa image/generate). The
+    host owns provider, billing and storage; we send a prompt plus optional reference
+    image URLs (existing character views) and get back a hosted URL, which the engine
+    persists per-game exactly as with any other provider. No seed (Anna exposes none);
+    references are passed straight through for identity-conditioned renders."""
+
+    @staticmethod
+    def _snap_size(size) -> str:
+        w, h = size
+        if w > h:
+            return "1536x1024"
+        if h > w:
+            return "1024x1536"
+        return "1024x1024"
+
+    def generate(self, prompt, size, seed=None, references=None):
+        _seed, references = self._degrade(seed, references)   # seed dropped; refs kept
+        result = hostbridge.generate_image_sync(
+            prompt=prompt, size=self._snap_size(size),
+            reference_image_urls=references or None)
+        images = (result or {}).get("images") or []
+        first = images[0] if images and isinstance(images[0], dict) else {}
+        url = first.get("url")
+        return {"image_url": url} if url else None
 
 
 _PROVIDERS = {"comfy": ComfyProvider, "openai": OpenAIProvider,

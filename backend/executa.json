@@ -8,5 +8,6 @@
   "tool_id": "tool-dev-gamentic",
   "type": "python",
   "enabled": true,
-  "command": [".venv/bin/python", "-m", "app.executa"]
+  "command": [".venv/bin/python", "-m", "app.executa"],
+  "host_capabilities": ["llm.sample", "llm.image"]
 }
