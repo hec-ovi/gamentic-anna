@@ -1,0 +1,395 @@
+"""Character rows: lookup, life, inventory, traits, origin, offers, and the
+full-screen profile. Also home of the gender net: gender is decided ONCE (explicit
+field, or inferred from the sheet at creation) and stored, so image, prose and voice
+can never disagree about it."""
+import json
+import re
+
+from .. import db
+from . import clock, games, items
+from .base import _id, norm_name
+
+_FEMALE = re.compile(r"\b(woman|women|female|girl|lady|she|her|hers)\b", re.I)
+_MALE = re.compile(r"\b(man|men|male|boy|guy|gentleman|he|him|his)\b", re.I)
+
+
+def gender_hint(*texts) -> str:
+    """'female' | 'male' | '' inferred from pronouns/nouns across the given texts."""
+    blob = " ".join(t or "" for t in texts)
+    if _FEMALE.search(blob):
+        return "female"
+    if _MALE.search(blob):
+        return "male"
+    return ""
+
+
+def _tidy(text: str) -> str:
+    """Trait/origin/moment texts as clean prose: snake_case collapsed, markdown/quote
+    debris stripped from the edges (live: 'detached_seer_like_calm`')."""
+    return norm_name(text).strip("`*_~\"' ").rstrip(".")
+
+
+def character_gender(c) -> str:
+    """The character's gender: the stored field, else inferred from their sheet
+    (legacy rows created before the column existed)."""
+    stored = (c["gender"] or "").strip() if "gender" in c.keys() else ""
+    return stored or gender_hint(c["appearance"], c["description"], c["persona"], c["name"])
+
+
+def get_characters(conn, gid: str):
+    return conn.execute("SELECT * FROM characters WHERE game_id=?", (gid,)).fetchall()
+
+
+def present_characters(conn, gid: str, location: str):
+    return conn.execute(
+        "SELECT * FROM characters WHERE game_id=? AND present=1 AND location=?",
+        (gid, location),
+    ).fetchall()
+
+
+def find_character_by_name(conn, gid: str, name: str):
+    return conn.execute(
+        "SELECT * FROM characters WHERE game_id=? AND lower(name)=lower(?)",
+        (gid, name.strip()),
+    ).fetchone()
+
+
+def get_character(conn, cid: str):
+    return conn.execute("SELECT * FROM characters WHERE id=?", (cid,)).fetchone()
+
+
+def resolve_target(conn, gid: str, name: str):
+    """Map a target to ('player', None) | ('character', row) | (None, None).
+    Accepts a character ID (what the UI's entity chips send) or a name (what the
+    model writes); ID is tried first so renames/duplicate names cannot misroute."""
+    n = (name or "").strip().lower()
+    if n in ("player", "you", "me", "the player", "hero", "protagonist"):
+        return ("player", None)
+    if not n:
+        return (None, None)
+    ch = conn.execute("SELECT * FROM characters WHERE game_id=? AND id=?", (gid, n)).fetchone()
+    if not ch:
+        ch = conn.execute("SELECT * FROM characters WHERE game_id=? AND lower(name)=lower(?)",
+                          (gid, n)).fetchone()
+    return ("character", ch) if ch else (None, None)
+
+
+def set_character_images(conn, char_id: str, face_url=None, body_front_url=None, body_side_url=None) -> None:
+    conn.execute(
+        "UPDATE characters SET face_url=?, body_front_url=?, body_side_url=? WHERE id=?",
+        (face_url, body_front_url, body_side_url, char_id),
+    )
+
+
+def character_has_images(c) -> bool:
+    # ALL THREE: a partial set (one render landed, the rest crashed) must keep counting
+    # as missing so the per-turn self-heal completes it.
+    return bool(c["face_url"] and c["body_front_url"] and c["body_side_url"])
+
+
+def set_character_voice(conn, char_id: str, voice_id: str, provider: str | None = None) -> None:
+    """Store the resolved voice_id; when the resolving provider is known, stamp it
+    too so a provider switch knows which characters still need re-resolution."""
+    if provider is None:
+        conn.execute("UPDATE characters SET voice_id=? WHERE id=?", (voice_id, char_id))
+    else:
+        conn.execute("UPDATE characters SET voice_id=?, voice_provider=? WHERE id=?",
+                     (voice_id, provider, char_id))
+
+
+def set_voice_design(conn, char_id: str, design: str) -> None:
+    """The composed voice DESCRIPTION (engine-owned identity; survives provider swaps)."""
+    conn.execute("UPDATE characters SET voice_design=? WHERE id=?", (design, char_id))
+
+
+def set_character_life(conn, cid: str, delta: int):
+    """Apply a life delta to a character. Returns (new_life, died: bool). At 0 the character dies."""
+    c = get_character(conn, cid)
+    new = max(0, min(c["max_life"], c["life"] + delta))
+    died = new <= 0
+    conn.execute("UPDATE characters SET life=?, alive=?, present=? WHERE id=?",
+                 (new, 0 if died else 1, 0 if died else c["present"], cid))
+    return new, died
+
+
+def _save_inventory(conn, cid: str, inv: list) -> None:
+    conn.execute("UPDATE characters SET inventory=? WHERE id=?", (json.dumps(inv), cid))
+
+
+def character_add_item(conn, cid: str, name: str, description: str = "",
+                       hidden: bool = False, qty: int = 1, cap: int | None = None,
+                       image_url: str | None = None) -> str:
+    name = norm_name(name)
+    inv = db.loads(get_character(conn, cid)["inventory"], [])
+    it = items.find_by_name(inv, name)
+    if it is not None:
+        items.stack(it, qty, image_url)
+    else:
+        if cap is not None and len(inv) >= cap:
+            return "full"
+        inv.append(items.new_record(name, description, image_url=image_url,
+                                    hidden=bool(hidden), qty=qty))
+    _save_inventory(conn, cid, inv)
+    return "ok"
+
+
+def character_reveal_item(conn, cid: str, name: str) -> bool:
+    inv = db.loads(get_character(conn, cid)["inventory"], [])
+    if items.unhide(inv, name):
+        _save_inventory(conn, cid, inv)
+        return True
+    return False
+
+
+def character_remove_item(conn, cid: str, key: str, qty: int = 1):
+    """Remove by item ID or name; returns the matched item dict or None (see players.remove_item)."""
+    inv = db.loads(get_character(conn, cid)["inventory"], [])
+    it = items.take_out(inv, key, qty)
+    if it is not None:
+        _save_inventory(conn, cid, inv)
+    return it
+
+
+def spawn_character(conn, gid: str, name: str, persona: str, appearance: str = "",
+                    knowledge: str = "", location: str | None = None,
+                    life: int = 10, gender: str = "", origin: str = "",
+                    relation: str = "") -> str:
+    """Add a character to the game on the fly (dynamic narrator). Gender is fixed at
+    birth: explicit when given, else inferred once from the sheet, so every consumer
+    (image, prose, voice) agrees from the first moment."""
+    from . import players
+    location = norm_name(location) if location else players.get_player(conn, gid)["location"]
+    gender = (gender or "").strip().lower()
+    if gender not in ("female", "male"):
+        gender = gender_hint(appearance, persona, name)
+    cid = _id()
+    conn.execute(
+        "INSERT INTO characters (id, game_id, name, persona, knowledge, appearance, "
+        "location, life, max_life, present, gender, origin, relation) "
+        "VALUES (?,?,?,?,?,?,?,?,?,1,?,?,?)",
+        (cid, gid, name, persona, knowledge, appearance, location, life, life, gender,
+         origin, relation.strip()),
+    )
+    return cid
+
+
+def kill_character(conn, cid: str) -> None:
+    conn.execute("UPDATE characters SET alive=0, present=0, life=0 WHERE id=?", (cid,))
+
+
+def set_disposition(conn, cid: str, disposition: str) -> None:
+    conn.execute("UPDATE characters SET disposition=? WHERE id=?", (disposition, cid))
+
+
+def set_relation(conn, cid: str, relation: str) -> None:
+    """What this character IS to the player (free 1-2 words: sister, boss, ally, rival).
+    A different axis from disposition: disposition is the 4-mood mechanical dial,
+    relation is the narrative bond, the narrator's free choice."""
+    conn.execute("UPDATE characters SET relation=? WHERE id=?", (relation.strip(), cid))
+
+
+def character_relation(c) -> str:
+    return (c["relation"] or "").strip() if "relation" in c.keys() else ""
+
+
+def set_following(conn, cid: str, following: bool) -> None:
+    conn.execute("UPDATE characters SET following=? WHERE id=?", (1 if following else 0, cid))
+
+
+def set_character_location(conn, cid: str, location: str) -> None:
+    """Move a character to a scene. The location passes through the same canonical key
+    normalization scenes use, so a drifting name can never strand a character at a key
+    no scene lookup will match."""
+    conn.execute("UPDATE characters SET location=? WHERE id=?", (norm_name(location), cid))
+
+
+def set_character_description(conn, cid: str, description: str) -> None:
+    conn.execute("UPDATE characters SET description=? WHERE id=?", (description, cid))
+
+
+def set_character_context(conn, char_id: str, used: int) -> None:
+    """Each character agent has its OWN context; record its last prompt size."""
+    conn.execute("UPDATE characters SET context_used=? WHERE id=?", (int(used or 0), char_id))
+
+
+def set_character_summary(conn, cid: str, text: str, through_turn: int) -> None:
+    """Store a character's updated private recap and the beats turn_index it covers
+    through (the same cursor unit as the game recap)."""
+    conn.execute("UPDATE characters SET memory_summary=?, summarized_through=? WHERE id=?",
+                 (text, int(through_turn), cid))
+
+
+def set_character_origin(conn, cid: str, text: str) -> None:
+    """Replace a character's private backstory (the creation-time enrichment pass).
+    Read by the narrator's secrets block and the character's own agent; the player
+    only ever sees pieces unlocked through reveal_origin."""
+    conn.execute("UPDATE characters SET origin=? WHERE id=?", (_tidy(text), cid))
+
+
+# ---------- traits (personality unlocked through play) ----------
+
+def add_trait(conn, cid: str, text: str, cap: int) -> str | None:
+    """Unlock a personality trait on a character (earned through play). Returns the
+    cleaned trait text, or None when it is a duplicate, empty, or the card is full.
+    Stamped with the story clock so the profile can say WHEN it was revealed."""
+    text = _tidy(text)
+    if not text:
+        return None
+    c = get_character(conn, cid)
+    traits = db.loads(c["traits"], [])
+    if len(traits) >= cap or any(t["text"].lower() == text.lower() for t in traits):
+        return None
+    minutes = games.get_game(conn, c["game_id"])["time_minutes"] or 0
+    traits.append({"id": _id(), "text": text, "minutes": minutes})
+    conn.execute("UPDATE characters SET traits=? WHERE id=?", (json.dumps(traits), cid))
+    return text
+
+
+def character_traits(c) -> list[dict]:
+    # norm_name at READ time too: rows recorded before the write-side cleaner existed
+    # keep their raw snake_case in the DB (live: "detached_seer_like_calm")
+    return [{"id": t["id"], "text": _tidy(t["text"]),
+             "unlocked": clock.time_at(t.get("minutes") or 0)["label"]}
+            for t in db.loads(c["traits"], [])]
+
+
+def add_origin_fact(conn, cid: str, text: str, cap: int) -> str | None:
+    """The player just LEARNED a piece of this character's past (reveal_origin tool).
+    Returns the cleaned text, or None when duplicate/empty/full. Story-clock stamped.
+    The full origin stays private; only revealed pieces ever reach the profile."""
+    text = _tidy(text)
+    if not text:
+        return None
+    c = get_character(conn, cid)
+    revealed = db.loads(c["origin_revealed"], [])
+    if len(revealed) >= cap or any(r["text"].lower() == text.lower() for r in revealed):
+        return None
+    minutes = games.get_game(conn, c["game_id"])["time_minutes"] or 0
+    revealed.append({"id": _id(), "text": text, "minutes": minutes})
+    conn.execute("UPDATE characters SET origin_revealed=? WHERE id=?",
+                 (json.dumps(revealed), cid))
+    return text
+
+
+def character_origin_revealed(c) -> list[dict]:
+    return [{"id": r["id"], "text": _tidy(r["text"]),
+             "learned": clock.time_at(r.get("minutes") or 0)["label"]}
+            for r in db.loads(c["origin_revealed"], [])]
+
+
+def add_moment(conn, cid: str, text: str, cap: int = 20) -> str | None:
+    """Record a PIVOTAL shared event between this character and the player (a bond, a
+    wound, a gift, a betrayal, a parting). These are the character's MEMORIES of the
+    player: curated events, never transcript. Deduped, story-clock stamped, capped."""
+    text = _tidy(text)
+    if not text:
+        return None
+    c = get_character(conn, cid)
+    moments = db.loads(c["moments"], []) if "moments" in c.keys() else []
+    if any(m["text"].lower() == text.lower() for m in moments):
+        return None
+    # at the cap the OLDEST memory yields: in a long story the newest pivotal events
+    # matter more than the first ones (rejecting new arrivals froze the list in act one)
+    if len(moments) >= cap:
+        moments = moments[-(cap - 1):]
+    minutes = games.get_game(conn, c["game_id"])["time_minutes"] or 0
+    moments.append({"id": _id(), "text": text, "minutes": minutes})
+    conn.execute("UPDATE characters SET moments=? WHERE id=?", (json.dumps(moments), cid))
+    return text
+
+
+def character_moments(c) -> list[dict]:
+    moments = db.loads(c["moments"], []) if "moments" in c.keys() else []
+    return [{"id": m["id"], "text": _tidy(m["text"]),
+             "when": clock.time_at(m.get("minutes") or 0)["label"]}
+            for m in moments]
+
+
+def character_profile(conn, gid: str, cid: str) -> dict | None:
+    """The full-screen character view: public card data + unlocked traits + PIVOTAL
+    shared moments (curated events: bonds, wounds, gifts, partings - never transcript,
+    never whispers) + story images as memories. PLAYER-VISIBLE only: persona and
+    private knowledge never leave the DB."""
+    c = get_character(conn, cid)
+    if not c or c["game_id"] != gid:
+        return None
+    # memories: images of moments this character is truly part of. Two rules, both
+    # live-found: (1) a PRIVATE image belongs to its private_with character and to no
+    # one else - whatever the caption says (a whispered look at Layla once landed in
+    # Rust's gallery); (2) public images match the character's name as WHOLE WORDS -
+    # plain substring matching handed Rust every caption containing "trust" or
+    # "rusted". (Location-based attribution died earlier for the same reason: every
+    # bystander got the same gallery.)
+    mem_rows = conn.execute(
+        "SELECT * FROM beats WHERE game_id=? AND kind='image' AND image_url IS NOT NULL "
+        "ORDER BY turn_index DESC LIMIT 60", (gid,)).fetchall()
+    tokens = [t for t in re.split(r"[^a-z0-9]+", (c["name"] or "").lower()) if len(t) >= 3]
+    name_re = re.compile(r"\b(?:%s)\b" % "|".join(map(re.escape, tokens))) if tokens else None
+
+    def _is_theirs(b) -> bool:
+        if b["private_with"]:
+            return b["private_with"] == c["id"]
+        return bool(name_re and name_re.search((b["text"] or "").lower()))
+    memories = [{"image_url": b["image_url"], "caption": b["text"], "turn_index": b["turn_index"]}
+                for b in mem_rows if _is_theirs(b)][:8]
+    memories.reverse()
+    return {
+        "id": c["id"], "name": c["name"], "description": c["description"],
+        "gender": character_gender(c),
+        "relation": character_relation(c),
+        "disposition": c["disposition"], "following": bool(c["following"]),
+        "alive": bool(c["alive"]), "life": c["life"], "max_life": c["max_life"],
+        "face_url": c["face_url"], "body_url": c["body_front_url"],
+        "voice_id": c["voice_id"], "color": c["color"],
+        "carrying": items.visible_items(c["inventory"]),
+        "traits": character_traits(c),
+        # only the pieces of their past the player has LEARNED (the full origin is private)
+        "origin": character_origin_revealed(c),
+        "moments": character_moments(c),
+        "memories": memories,
+    }
+
+
+# ---------- offered actions (the player's buttons toward a character) ----------
+
+def offer_action(conn, cid: str, label: str, cap_total: int) -> bool:
+    """Add a narrator-offered contextual action to a character. Offers are a LIVING
+    surface (owner call 2026-06-11: the buttons read too static): at least one
+    contextual slot always exists even when the disposition base set fills the cap,
+    and when the offer slots are full a NEW offer evicts the OLDEST one instead of
+    bouncing - the narrator prompt's 'let stale offers go' is mechanical now."""
+    from .. import constants
+    c = get_character(conn, cid)
+    base = constants.ACTIONS_BY_DISPOSITION.get(c["disposition"], [])
+    offers = db.loads(c["offers"], [])
+    if any(o["label"].lower() == label.lower() for o in offers) or \
+       any(lbl.lower() == label.lower() for lbl, _ in base):
+        return True   # already a button (offered or base): nothing to add
+    room = max(cap_total - len(base), 1)
+    offers = offers[-(room - 1):] if room > 1 else []   # full -> the oldest yields
+    offers.append({"id": _id(), "label": label})
+    conn.execute("UPDATE characters SET offers=? WHERE id=?", (json.dumps(offers), cid))
+    return True
+
+
+def available_actions(conn, c, cap_total: int) -> list[dict]:
+    """The player's action buttons for a character: disposition base set + narrator
+    offers, capped. Offers keep their seat: when the set overflows the cap, the
+    LAST base actions give way (Talk always survives), never the contextual offers.
+    Deterministic sanity on the base set (owner playtest 2026-06-11): 'Give...' only
+    exists while the player holds anything to give, and a character already following
+    offers 'Ask to stay' instead of 'Ask to follow'."""
+    from .. import constants
+    from . import players
+    pack = db.loads(players.get_player(conn, c["game_id"])["inventory"], [])
+    base = []
+    for i, (lbl, typ) in enumerate(constants.ACTIONS_BY_DISPOSITION.get(c["disposition"], [])):
+        if typ == "give" and not pack:
+            continue
+        if typ == "follow" and c["following"]:
+            lbl = "Ask to stay"
+        base.append({"id": f"b{i}", "label": lbl, "type": typ})
+    offers = [{"id": o["id"], "label": o["label"], "type": "offer"} for o in db.loads(c["offers"], [])
+              if not any(b["label"].lower() == o["label"].lower() for b in base)]
+    keep = max(cap_total - len(offers), 1)
+    return (base[:keep] + offers)[:cap_total]

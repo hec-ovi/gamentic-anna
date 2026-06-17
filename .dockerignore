@@ -1,0 +1,17 @@
+# Keep the app build context lean: the image rebuilds the venv and needs no host
+# venv/node_modules/state/git. (anna-api and anna-agent build from their own subdirs.)
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+.git
+.gitignore
+backend/data
+backend/gamentic.db
+backend/gamentic.db-*
+frontend/dist
+frontend/examples
+notes
+bundle
+tests
+*.log

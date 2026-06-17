@@ -1,32 +1,27 @@
 {
   "schema": 2,
-  "permissions": ["storage.read", "storage.write", "chat.append_artifact"],
-  "required_executas": [],
-  "system_prompt_addendum": "When the user wants to play or build a world, summon the game window via open_app_view('play').",
+  "permissions": ["tools.invoke"],
+  "required_executas": [
+    { "tool_id": "tool-dev-gamentic", "version": "latest" }
+  ],
+  "system_prompt_addendum": "When the user wants to play or build a text adventure, summon the game window via open_app_view('play').",
   "ui": {
-    "bundle": {
-      "format": "static-spa",
-      "entry": "index.html"
-    },
+    "bundle": { "format": "static-spa", "entry": "index.html" },
     "views": [
       {
         "name": "play",
         "title": "Gamentic",
         "default": true,
-        "default_size": { "w": 960, "h": 720 },
+        "default_size": { "w": 480, "h": 760 },
         "min_size": { "w": 360, "h": 560 },
-        "max_size": { "w": 1600, "h": 1200 },
+        "max_size": { "w": 1280, "h": 1400 },
         "resizable": true,
         "movable": true
       }
     ],
     "host_api": {
-      "llm": ["complete"],
-      "storage": ["get", "set", "delete", "list"],
-      "image": ["generate"],
-      "chat": ["append_artifact"],
-      "window": ["set_title"],
-      "agent": { "session": { "auto": true } }
+      "tools": ["required:*"],
+      "window": ["set_title", "open_view"]
     }
   }
 }

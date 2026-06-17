@@ -1,17 +1,17 @@
-# local strategy / planning / console notes - never publish
-PLAN.md
-CONSOLE-FORMS.md
-notes/
-.plan/
+# local env + databases (never publish)
+.env
+*.db
+*.db-*
 
 # anna cli working dir (dev tokens, recordings, staged bundle)
 .anna/
 
-# deps / build
+# deps / build / caches
 node_modules/
 dist/
 .venv/
 __pycache__/
+.pytest_cache/
 
 # os
 .DS_Store

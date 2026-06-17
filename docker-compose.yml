@@ -1,0 +1,47 @@
+# Gamentic on Anna: ONE container, fully isolated, Anna-powered, no GPU.
+#
+# Inside it, supervisord runs the whole Anna environment on container-localhost:
+#   :19001  the Anna backend (vendor binary) + one-time sign-in UI
+#   :9100   the OpenAI <-> Anna copilot bridge (internal)
+#   :5180   the Anna UI runner: gamentic iframe + the engine Executa
+#
+# The UI is the Anna app runner; the backend is the Anna agent. Isolation: named
+# volumes only (no host folders touched), ports bound to 127.0.0.1, no privileged,
+# no host bind-mounts, no docker socket. Full teardown: docker compose down -v
+#
+# First run: `docker compose up -d --build`, open http://localhost:19001 and sign
+# in to your Anna account once (persists on anna-data). Play at http://localhost:5180.
+name: gamentic-anna
+
+services:
+  gamentic:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+    image: gamentic-anna:latest
+    pull_policy: build
+    container_name: gamentic-anna
+    restart: unless-stopped
+    environment:
+      - ANNA_TEXT_MODEL=${ANNA_TEXT_MODEL:-anna-copilot}
+      # images ON via the experimental Anna copilot image path
+      - ANNA_IMAGE_VIA_COPILOT=${ANNA_IMAGE_VIA_COPILOT:-true}
+      # optional headless sign-in; blank = sign in once in the Web UI at :19001
+      - ANNA_AGENT_USERNAME=${ANNA_AGENT_USERNAME:-}
+      - ANNA_AGENT_PASSWORD=${ANNA_AGENT_PASSWORD:-}
+    volumes:
+      - anna-data:/data/anna    # Anna agent state; the one-time sign-in persists here
+      - game-data:/data/game    # game DB
+    ports:
+      - "127.0.0.1:19001:19001"             # one-time Anna sign-in
+      - "127.0.0.1:${APP_PORT:-5180}:5180"  # the game window
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:19001/health && curl -fsS -o /dev/null http://localhost:5180/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 10
+      start_period: 90s
+
+volumes:
+  anna-data:   # Anna agent session/state; the one-time sign-in persists here
+  game-data:   # game DB
