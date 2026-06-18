@@ -22,6 +22,7 @@ import asyncio
 import base64
 import io
 import json
+import logging
 import os
 import sys
 import threading
@@ -164,6 +165,10 @@ def _ensure_client() -> None:
 def _warm() -> None:
     """Startup: the warm ASGI client AND the host channel, so the engine reverse-RPCs
     Anna for LLM/images for the rest of the process's life."""
+    # ASGITransport skips the app's lifespan, so the engine's loggers are never
+    # configured and image/summary failures render invisibly. Configure here (to stderr,
+    # which the dev harness surfaces) so detached job errors and engine logs are visible.
+    logging.basicConfig(level=logging.INFO, stream=sys.stderr)
     _ensure_client()
     hostbridge.set_channel(hostbridge.HostChannel(loop=_loop, sampling=_sampling, image=_image))
 

@@ -12,8 +12,6 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from concurrent.futures import ThreadPoolExecutor
-
 from . import db, repo, engine, creator, integrate, media, prompts, llm, constants, transfer, hostbridge
 from .integrate import events as game_events
 from .config import settings
@@ -41,20 +39,23 @@ app.add_middleware(
 
 
 # Post-response jobs (art renders, summary folds, origin enrichment) are scheduled
-# through here. Outside an Anna Executa they run as Starlette BackgroundTasks, which
-# fire AFTER the response under uvicorn (correct, and what every test exercises). But
-# under the Executa transport (httpx ASGITransport) BackgroundTasks are awaited INSIDE
-# the invoke, so a turn would not return until all its art rendered (1 to 3 min each) -
-# long enough that the Anna dev harness tears the executa down ("executa process
-# exited"). So as an Executa we dispatch them FIRE-AND-FORGET on a small pool: prose
-# returns in seconds and late images are picked up by the frontend's /beats?since= and
-# /state polling. The jobs open their own DB connections, so detaching is safe.
-_DETACHED = ThreadPoolExecutor(max_workers=4, thread_name_prefix="art")
-
-
+# through here. Outside an Anna Executa they run as Starlette BackgroundTasks (they fire
+# AFTER the response under uvicorn - correct, and what every test exercises).
+#
+# Inside an Executa they MUST run before the invoke returns. Anna mints the image /
+# sampling reverse-RPC token at invoke time and tears it down when the invoke completes,
+# so a render deferred past the invoke (the earlier fire-and-forget pool) silently loses
+# the token and produces no image. We therefore run them synchronously here, inside the
+# live invoke (the same path /view already uses successfully). Most turns render 0-1
+# images so this is quick; creation is the heavy case (portraits + scene + items). A job
+# failure is logged, never raised - a missing image must not kill the turn.
 def _schedule(background_tasks: BackgroundTasks, fn, *args) -> None:
     if hostbridge.active():
-        _DETACHED.submit(fn, *args)
+        try:
+            fn(*args)
+        except Exception:
+            logging.getLogger("gamentic.jobs").exception(
+                "render job %s failed", getattr(fn, "__name__", fn))
     else:
         background_tasks.add_task(fn, *args)
 
