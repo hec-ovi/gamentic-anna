@@ -509,7 +509,26 @@ button { font: inherit; cursor: pointer; }
 .lib-stage .empty-state .holo-btn { margin: 0 auto; }
 
 /* ---- creator (forge) ---- */
-.forge-main { position: relative; z-index: 2; flex: 1; min-height: 0; overflow: hidden; padding: clamp(1.2rem, 4vw, 2.5rem); display: flex; justify-content: center; }
+/* the quick start sits on top and the world-builder chat folds below it, so the column
+   scrolls as one (the chat thread keeps its own inner scroll when it grows) */
+.forge-main { position: relative; z-index: 2; flex: 1; min-height: 0; overflow-y: auto; padding: clamp(1.2rem, 4vw, 2.5rem); display: flex; flex-direction: column; align-items: center; gap: 1.4rem; }
+
+/* the one-box quick start: the primary path, one sentence -> a complete seeded game */
+.forge-quick { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 0.7rem; }
+.forge-quick-title { font-family: var(--font-display); font-size: clamp(1.1rem, 3.5vw, 1.5rem); letter-spacing: 0.08em; margin: 0; color: var(--ink); }
+.forge-quick-sub { margin: 0; color: var(--ink-muted); font-size: 0.85rem; line-height: 1.5; }
+.forge-quick-form { display: flex; flex-direction: column; gap: 0.7rem; }
+/* a visually-hidden label keeps the textarea accessible (queried by accessible name) */
+.forge-quick-label { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.forge-quick-input { width: 100%; resize: vertical; min-height: 3.2rem; line-height: 1.5; }
+.forge-quick-begin { align-self: flex-start; padding: 0.7rem 1.4rem; font-size: 0.9rem; }
+
+/* the multi-turn world-builder chat, folded beneath the quick start as a secondary path */
+.forge-chat { width: 100%; max-width: 720px; border-top: 1px solid var(--line-soft); padding-top: 1.1rem; }
+.forge-chat-summary { cursor: pointer; font-family: var(--font-display); font-size: 0.72rem; letter-spacing: 0.16em; text-transform: uppercase; color: var(--accent); list-style: none; padding: 0.3rem 0; }
+.forge-chat-summary::-webkit-details-marker { display: none; }
+.forge-chat .forge-thread { max-height: 46vh; margin-top: 0.9rem; }
+.forge-chat-bar { display: flex; flex-direction: column; gap: 0.7rem; align-items: center; margin-top: 0.9rem; }
 /* the thread itself is the scroll container (matches #creatorThread, which app.js pins to the bottom) */
 .forge-thread { width: 100%; max-width: 720px; display: flex; flex-direction: column; gap: 0.9rem; overflow-y: auto; min-height: 0; }
 .forge-msg {

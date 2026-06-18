@@ -114,6 +114,11 @@ export function createApi(backendUrl, { invoke = null } = {}) {
       request("/create/message", { method: "POST", body: { session_id: sessionId, message }, timeout: LLM_TIMEOUT_MS }),
     creatorFinalize: (sessionId) =>
       request("/create/finalize", { method: "POST", body: { session_id: sessionId }, timeout: LLM_TIMEOUT_MS }),
+    // One sentence -> a complete seeded game in a single pass (no chat, no function-calling
+    // dependency). The backend coerces/falls back so it never 409s; an empty prompt is a
+    // surprise-me. LLM timeout: a one-shot world build can run minutes.
+    quickCreate: (prompt) =>
+      request("/create/quick", { method: "POST", body: { prompt: prompt || "" }, timeout: LLM_TIMEOUT_MS }),
     creatorSession: (sessionId) => request(`/create/${encodeURIComponent(sessionId)}`),
   };
 }

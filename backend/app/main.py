@@ -502,3 +502,21 @@ def create_finalize(body: dict, background_tasks: BackgroundTasks):
     if settings.IMAGE_ENABLED:
         _schedule(background_tasks, integrate.generate_creation_art, gid, scene_id)
     return {"game_id": gid}
+
+
+@app.post("/create/quick")
+def create_quick(body: dict, background_tasks: BackgroundTasks):
+    """One sentence -> a complete, seeded, playable game in a single pass. Unlike the chat
+    finalize (which needs the model to CALL save_world, a tool call Anna cannot make), the
+    model returns the world as JSON and creator.quick_create coerces/falls back so it NEVER
+    fails. An empty prompt is treated as a surprise-me. Mirrors create_finalize from there:
+    assign voices, then schedule origin enrichment + creation art."""
+    prompt = (body.get("prompt") or "").strip() if isinstance(body, dict) else ""
+    with db.get_conn() as conn:
+        gid = creator.quick_create(conn, prompt)
+        integrate.assign_voices_for_game(conn, gid)
+        scene_id = repo.current_scene(conn, gid)["id"]
+    _schedule(background_tasks, creator.enrich_origins, gid)   # thin backstories get real ones
+    if settings.IMAGE_ENABLED:
+        _schedule(background_tasks, integrate.generate_creation_art, gid, scene_id)
+    return {"game_id": gid}

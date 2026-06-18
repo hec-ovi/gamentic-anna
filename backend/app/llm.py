@@ -36,12 +36,13 @@ def chat(
     max_tokens: int = 400,
     stop: list[str] | None = None,
     thinking: bool | None = None,
+    response_format: dict | None = None,
 ) -> LLMReply:
     # Native Anna path: when running as an Executa, the engine reverse-RPCs the host
     # LLM directly (no HTTP gateway). Everything outside the executa (tests, plain
     # uvicorn) falls through to the unchanged HTTP path below.
     if hostbridge.active():
-        return _anna_chat(messages, tools, tool_choice, temperature, stop)
+        return _anna_chat(messages, tools, tool_choice, temperature, stop, response_format)
     # Resolved at call time (env -> default), so a .env change lands on the
     # next compose up with no code involved.
     cfg = providers.resolve("text")
@@ -55,6 +56,8 @@ def chat(
     if tools:
         payload["tools"] = tools
         payload["tool_choice"] = tool_choice
+    if response_format:                 # structured-JSON output (e.g. {"type": "json_object"})
+        payload["response_format"] = response_format
     if stop:
         # Truncate, never error: stops are a guard, not content. Upstream llama.cpp
         # imposes NO cap (the server reads the whole "stop" array into its antiprompt
@@ -268,10 +271,12 @@ def _norm_stop(stop_reason) -> str:
     return "length" if s in ("length", "max_tokens", "maxtokens") else (stop_reason or "")
 
 
-def _anna_chat(messages, tools, tool_choice, temperature, stop) -> LLMReply:
+def _anna_chat(messages, tools, tool_choice, temperature, stop, response_format=None) -> LLMReply:
     system_prompt, mcp = _to_mcp(messages)
-    response_format = None
     if tools:
+        # Tools always force the strict {prose, tool_calls} envelope; a caller-supplied
+        # response_format is for the tool-less structured-JSON path (e.g. quick_create's
+        # json_object), so the envelope takes precedence here.
         directive = _tools_directive(tools)
         system_prompt = f"{system_prompt}\n\n{directive}" if system_prompt else directive
         response_format = _TOOL_ENVELOPE_SCHEMA

@@ -87,8 +87,10 @@ test("the begin button stays locked until the world-builder signals ready, then 
   );
   await mountApp();
   await u.click(screen.getByRole("button", { name: /forge a world/i }));
-  // locked from the first breath: a fresh chat has no world yet
-  const begin = () => screen.getByRole("button", { name: /begin/i });
+  // locked from the first breath: a fresh chat has no world yet. Scope to the chat's
+  // begin button (its label carries the readiness state); the quick-start "Begin" is
+  // separate and always enabled.
+  const begin = () => screen.getByRole("button", { name: /begin \(not ready|begin the adventure|summoning/i });
   expect(begin().disabled).toBe(true);
   const box = screen.getByPlaceholderText(/describe your world/i);
   await u.type(box, "A haunted lighthouse");
@@ -100,6 +102,43 @@ test("the begin button stays locked until the world-builder signals ready, then 
   await screen.findByText(/your world is complete/i);
   expect(begin().disabled).toBe(false);                      // the ready reply unlocks it
   expect(begin().textContent).toMatch(/begin the adventure/i);
+});
+
+test("the one-box quick start: a sentence + Begin forges a world and drops into play", async () => {
+  const u = user();
+  let body = null;
+  server.use(
+    http.post(`${API}/create/quick`, async ({ request }) => {
+      body = await request.json().catch(() => ({}));
+      return HttpResponse.json({ game_id: "quick-1" });
+    }),
+  );
+  await mountApp();
+  await u.click(screen.getByRole("button", { name: /forge a world/i }));
+  // the one-box quick start textarea (the primary path, no chat needed)
+  const box = screen.getByRole("textbox", { name: /describe your adventure in a sentence/i });
+  await u.type(box, "A haunted lighthouse where the keeper never left.");
+  await u.click(screen.getByRole("button", { name: /^begin$/i }));
+  // it transitions straight into play (the default state fixture renders the scene)
+  expect(await screen.findByText("The Last Breath")).toBeTruthy();
+  // the prompt rode the request to POST /create/quick
+  expect(body.prompt).toMatch(/haunted lighthouse/i);
+});
+
+test("the quick start with an empty box is a surprise-me (still forges a world)", async () => {
+  const u = user();
+  let body = null;
+  server.use(
+    http.post(`${API}/create/quick`, async ({ request }) => {
+      body = await request.json().catch(() => ({}));
+      return HttpResponse.json({ game_id: "quick-2" });
+    }),
+  );
+  await mountApp();
+  await u.click(screen.getByRole("button", { name: /forge a world/i }));
+  await u.click(screen.getByRole("button", { name: /^begin$/i })); // nothing typed
+  expect(await screen.findByText("The Last Breath")).toBeTruthy();
+  expect(body.prompt).toBe(""); // empty prompt accepted, treated as surprise-me
 });
 
 test("a restored session that was already ready keeps the begin button unlocked", async () => {

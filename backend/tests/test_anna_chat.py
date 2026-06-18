@@ -95,6 +95,19 @@ def test_no_tools_returns_prose_and_normalizes_length(anna):
     assert r.content == "narration"
     assert r.tool_calls == []
     assert r.finish_reason == "length"      # Anna's stopReason normalized for the engine
+    assert anna["kw"]["response_format"] is None    # a plain call passes none
+
+
+def test_response_format_threads_through_on_the_no_tools_path(anna):
+    # quick_create asks for structured JSON without tools: the json_object request must
+    # reach the host sample, with on_unsupported so a model lacking it degrades, not fails.
+    anna["result"] = _sampled('{"title":"A World"}')
+    r = llm.chat([{"role": "user", "content": "make a json world"}],
+                 response_format={"type": "json_object"})
+    assert r.content == '{"title":"A World"}'      # raw JSON text, no tool parsing
+    assert r.tool_calls == []
+    assert anna["kw"]["response_format"] == {"type": "json_object"}
+    assert anna["kw"]["on_unsupported"] == "json_object"
 
 
 def test_schema_rejection_downgrades_to_json_object(monkeypatch):

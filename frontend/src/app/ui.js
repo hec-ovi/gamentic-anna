@@ -6,7 +6,7 @@ import { Idiomorph } from "../../vendor/idiomorph.esm.js";
 import { markPmSeen } from "../adapters.js";
 import { renderApp } from "../render.js";
 import { executeComposer, executePrivate, setComposerMode, stackSegment, unstackSegment } from "./composerctl.js";
-import { beginAdventure, clearCreatorSession, enterCreator, resetCreator, sendCreatorMessage } from "./creatorctl.js";
+import { beginAdventure, clearCreatorSession, enterCreator, quickCreate, resetCreator, sendCreatorMessage } from "./creatorctl.js";
 import { root, state, storyNearBottom, torn, voice } from "./ctx.js";
 import { showHelp } from "./cues.js";
 import { exportGame, importGameFile, markArtReveals, openGame, refreshLibrary, removeGame, wipeEverything } from "./game.js";
@@ -38,6 +38,10 @@ function snapshotInputs() {
   }
   const creator = root.querySelector('[name="creatorText"]');
   if (creator && creator.value) kept.push({ sel: '[name="creatorText"]', value: creator.value, focus: creator === focused });
+  // the one-box quick-start textarea: its value only lands in state on submit, so a
+  // mid-typing re-render (a backend-online flip) must not wipe the unsent draft
+  const quick = root.querySelector('[name="quickPrompt"]');
+  if (quick && quick.value) kept.push({ sel: '[name="quickPrompt"]', value: quick.value, focus: quick === focused });
   return kept;
 }
 
@@ -194,6 +198,9 @@ function onRootSubmit(e) {
     const input = form.querySelector('[name="creatorText"]');
     sendCreatorMessage(input.value);
     input.value = "";
+  } else if (kind === "quick-create") {
+    // one-box quick start: submit the textarea straight to /create/quick (empty = surprise-me)
+    quickCreate(form.querySelector('[name="quickPrompt"]')?.value || "");
   }
 }
 

@@ -75,6 +75,10 @@ export function resetCreator() {
     busy: false,
     finalizing: false,
     restored: false,
+    // the one-box quick start: a single sentence -> a complete seeded game in one pass
+    // (no chat, never 409s). The multi-turn chat below stays as a secondary option.
+    quickPrompt: "",
+    chatOpen: false,
     // the begin button stays LOCKED until the world-builder signals the world is
     // complete (owner: it used to sit clickable the whole chat and bounce a 409);
     // each reply carries the flag, so changing direction mid-chat re-locks it
@@ -112,6 +116,34 @@ export async function sendCreatorMessage(raw) {
     // the reply landed: hand the keyboard back to the chat box (owner: never
     // make the player click the box again after every reply)
     root.querySelector('[name="creatorText"]')?.focus();
+  }
+}
+
+// The one-box quick start: one sentence (or nothing, a surprise-me) -> a complete seeded
+// game in a single pass. The backend coerces/falls back so this never 409s; on success it
+// loads the game exactly like the finalize path. An empty prompt is allowed.
+export async function quickCreate(raw) {
+  const c = state.creator;
+  if (c.busy) return;
+  const prompt = String(raw ?? c.quickPrompt ?? "").trim();
+  c.quickPrompt = prompt;
+  c.busy = true;
+  c.finalizing = true; // same full-screen "forging your world" takeover as finalize
+  c.error = "";
+  render();
+  try {
+    const res = await api.quickCreate(prompt);
+    c.busy = false;
+    clearCreatorSession(); // a real game now exists; next New starts fresh
+    // leave finalizing on until openGame swaps the view, so the animation never flickers off
+    openGame(res.game_id);
+  } catch (err) {
+    c.busy = false;
+    c.finalizing = false;
+    c.error = "Could not forge the world: " + (err.message || "offline");
+    state.backendOnline = false;
+    render();
+    root.querySelector('[name="quickPrompt"]')?.focus();
   }
 }
 

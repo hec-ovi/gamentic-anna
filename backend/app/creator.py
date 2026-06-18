@@ -11,6 +11,7 @@ import re
 from . import engine, prompts, llm, repo, db
 from .config import settings
 from .engine import parsing
+from .llm import _loads_lenient
 from .models import WorldSheet
 
 ORIGIN_MIN_CHARS = 220   # ~3 short sentences; anything thinner gets the enrichment pass
@@ -143,4 +144,148 @@ def finalize(conn, session_id: str) -> str:
     gid = repo.create_game(conn, sheet)
     _seed_sheet_extras(conn, gid, sheet)
     conn.execute("DELETE FROM creator_sessions WHERE id=?", (session_id,))
+    return gid
+
+
+# ---------- one-shot quick creation (no function-calling, never fails) ----------
+# Anna has no OpenAI-style tool calls, so the chat finalize (which asks the model to CALL
+# save_world) abstains and 409s. quick_create takes ONE sentence and returns a complete,
+# seeded, playable game in a single pass: the model emits the WorldSheet as a JSON object
+# (json_object output, the word "JSON" must appear for Anna's L1 mode), we parse leniently,
+# fill every required piece with a themed default, and if anything at all goes wrong we
+# build the world deterministically from the prompt. Creation MUST NOT raise.
+
+# The directive that asks for the WorldSheet as plain JSON (mirrors FINALIZE_TOOL's field
+# list and guidance, recast as a JSON request). "JSON" is named outright: Anna's L1
+# json_object mode rejects a request whose text never mentions it.
+QUICK_DIRECTIVE = (
+    "You are a story-designer that turns one short idea into a complete, immediately "
+    "playable text-adventure world in a single shot.\n"
+    "Reply with ONLY a single JSON object (no prose before or after, no code fences) "
+    "describing the world, with exactly these fields:\n"
+    '- "title": a short evocative name for the adventure.\n'
+    '- "setting": one or two sentences placing the world (where and what).\n'
+    '- "tone": a few mood words (e.g. "grim, tense" or "whimsical, bright").\n'
+    '- "narrator_persona": voice/style guidance for the narrator.\n'
+    '- "opening_scenario": the opening narration shown to the player (a vivid paragraph '
+    "that drops them into the scene; PUBLIC, so never name a character's secret here).\n"
+    '- "start_location": the name of the place the story opens in.\n'
+    '- "player_life": starting hit points, an integer (20 for an ordinary hero).\n'
+    '- "characters": an array of 1 to 3 objects, each {"name", "persona" (who they are '
+    'and how they behave), "relation" (what they are to the player: stranger, sister, '
+    'rival...), "knowledge" (a private fact they hold)}.\n'
+    '- "quests": an array of at least one object {"title", "description", "objectives" '
+    "(an array of short objective strings)}.\n"
+    '- "scene_items": an array of at least one object {"name", "description", "fixed"} - '
+    "items already in the opening scene; leave \"fixed\": false on at least one piece of "
+    "takeable loot so the player can pick it up from turn one.\n"
+    '- "exits": an array of at least one object {"label" (e.g. "the oak door"), "target" '
+    '(the place it leads to)} - a way out of the opening scene.\n'
+    '- "player_items": an array of 0 to 2 objects {"name", "description"} the player '
+    "already carries (only if it fits the idea).\n"
+    "Make the world consistent with the player's idea and ready to play right now: real "
+    "names, a clear opening, a goal, something to grab, and somewhere to go."
+)
+
+
+def _nonempty(value) -> bool:
+    return bool(value) and bool(str(value).strip())
+
+
+def _coerce_quick_sheet(prompt: str, data: dict) -> WorldSheet:
+    """Turn whatever the model returned (or {}) into a WorldSheet that is ALWAYS playable:
+    every required piece is filled from the data when present and from a themed default
+    otherwise, so the result has a title, an opening, a start location, and at least one
+    character, one takeable scene item, one exit and one quest."""
+    data = data if isinstance(data, dict) else {}
+    theme = (prompt or "").strip() or "a surprising new world"
+    short = theme[:60].rstrip(" .,!?") or "the unknown"
+
+    title = data.get("title") if _nonempty(data.get("title")) else f"The Tale of {short}"
+    opening = (data.get("opening_scenario")
+               if _nonempty(data.get("opening_scenario"))
+               else f"The story opens. {theme}. The way ahead is yours to discover.")
+    start = data.get("start_location") if _nonempty(data.get("start_location")) else "the opening"
+
+    # characters: keep only well-formed ones; guarantee at least one companion
+    chars = []
+    for c in (data.get("characters") or []):
+        if isinstance(c, dict) and _nonempty(c.get("name")) and _nonempty(c.get("persona")):
+            chars.append(c)
+    if not chars:
+        chars = [{"name": "Companion", "relation": "stranger",
+                  "persona": f"A wary stranger drawn into {theme}. Watchful, capable, slow to trust.",
+                  "knowledge": "Knows more about this place than they first let on."}]
+
+    # quests: keep well-formed ones; guarantee at least one with an objective
+    quests = []
+    for q in (data.get("quests") or []):
+        if isinstance(q, dict) and _nonempty(q.get("title")):
+            quests.append(q)
+    if not quests:
+        quests = [{"title": f"Into {short}",
+                   "description": f"Make your way through {theme}.",
+                   "objectives": ["Get your bearings", "Find a way forward"]}]
+
+    # scene_items: keep well-formed ones; guarantee at least one TAKEABLE (fixed=False)
+    items = []
+    for si in (data.get("scene_items") or []):
+        if isinstance(si, dict) and _nonempty(si.get("name")):
+            items.append(si)
+    if not any(not bool(si.get("fixed")) for si in items):
+        items.append({"name": "worn satchel", "fixed": False,
+                      "description": "A worn satchel left within reach, waiting to be taken."})
+
+    # exits: keep well-formed ones; guarantee at least one
+    exits = []
+    for ex in (data.get("exits") or []):
+        if isinstance(ex, dict) and _nonempty(ex.get("label")) and _nonempty(ex.get("target")):
+            exits.append(ex)
+    if not exits:
+        exits = [{"label": "the way onward", "target": "beyond"}]
+
+    # player_items are optional; pass through only well-formed entries
+    pitems = [pi for pi in (data.get("player_items") or [])
+              if isinstance(pi, dict) and _nonempty(pi.get("name"))]
+
+    return WorldSheet(
+        title=title,
+        setting=data.get("setting") or theme,
+        tone=data.get("tone") or "",
+        narrator_persona=data.get("narrator_persona") or "",
+        opening_scenario=opening,
+        start_location=start,
+        player_life=data.get("player_life") or 20,
+        characters=chars,
+        quests=quests,
+        scene_items=items,
+        exits=exits,
+        player_items=pitems,
+    )
+
+
+def quick_create(conn, prompt: str) -> str:
+    """One sentence -> a complete, seeded, playable game in a single pass. The model
+    returns the WorldSheet as JSON (not a tool call - Anna has no function-calling); we
+    parse leniently, fill every required piece with a themed default, and fall back to a
+    fully deterministic world if the call raises or yields nothing usable. NEVER raises."""
+    data: dict = {}
+    try:
+        reply = llm.chat(
+            [{"role": "system", "content": QUICK_DIRECTIVE},
+             {"role": "user", "content": (prompt or "").strip()
+              or "Surprise me with a complete original adventure."}],
+            temperature=0.8,
+            max_tokens=0,                       # uncapped: the prompt governs length
+            response_format={"type": "json_object"},
+        )
+        parsed = _loads_lenient(reply.content or "")
+        data = parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        data = {}                               # any failure -> the deterministic fallback
+    # _coerce_quick_sheet backfills every required piece, so an empty data dict here still
+    # yields a fully playable themed world built from the prompt.
+    sheet = _coerce_quick_sheet(prompt, data)
+    gid = repo.create_game(conn, sheet)
+    _seed_sheet_extras(conn, gid, sheet)
     return gid

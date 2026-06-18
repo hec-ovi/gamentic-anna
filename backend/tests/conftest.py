@@ -38,6 +38,10 @@ class FakeLLM:
         self.character = llm.LLMReply(content="\"Stay close,\" she whispers.")
         self.character_replies = {}        # name -> LLMReply
         self.finalize = llm.LLMReply(content="", tool_calls=[])
+        # one-shot quick_create: the model returns the WorldSheet as a JSON string in
+        # .content. Default empty -> quick_create's deterministic fallback kicks in. Set
+        # to an Exception to exercise the call raising.
+        self.quick = llm.LLMReply(content="")
         self.creator_text = llm.LLMReply(content="What kind of world do you imagine?")
         self.image_prompt = llm.LLMReply(content="Wide shot of a place. plain unmarked surfaces, no signage.")
         # art director: default empty -> art_direction returns None and the templates
@@ -56,13 +60,18 @@ class FakeLLM:
         self.calls = []
 
     def __call__(self, messages, tools=None, tool_choice="auto", temperature=0.8,
-                 max_tokens=400, stop=None, thinking=None):
+                 max_tokens=400, stop=None, thinking=None, response_format=None):
         sys = messages[0]["content"] if messages else ""
         names = [t["function"]["name"] for t in (tools or [])]
         self.calls.append({"messages": messages, "tools": tools, "system": sys, "names": names,
-                           "max_tokens": max_tokens, "stop": stop, "thinking": thinking})
+                           "max_tokens": max_tokens, "stop": stop, "thinking": thinking,
+                           "response_format": response_format})
         if "save_world" in names:
             return self.finalize
+        if sys.startswith("You are a story-designer"):       # one-shot quick_create
+            if isinstance(self.quick, Exception):
+                raise self.quick
+            return self.quick
         if "submit_segments" in names:               # input interpreter
             return self.interpret
         if "cue_character" in names:                 # narrator toolset

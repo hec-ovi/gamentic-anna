@@ -182,6 +182,48 @@ export function renderCreator(state) {
     ? `<div class="forge-restored">${icon("rotate")}<span>Picked up where you left off. This conversation survived.</span></div>`
     : "";
 
+  // The one-box quick start: one sentence -> a complete seeded game in a single pass.
+  // It never depends on the chat being "ready"; an empty box is a surprise-me. This is the
+  // primary path; the multi-turn world-builder chat stays below it as a secondary option.
+  const quickStart = `
+    <section class="forge-quick">
+      <h2 class="forge-quick-title">Forge a world</h2>
+      <p class="forge-quick-sub">Describe your adventure in a sentence or two, then begin. Or leave it blank to be surprised.</p>
+      <form class="forge-quick-form" data-form="quick-create">
+        <label class="forge-quick-label" for="quickPrompt">Describe your adventure in a sentence or two</label>
+        <textarea id="quickPrompt" name="quickPrompt" class="holo-input forge-quick-input" rows="3" autocomplete="off"
+                  placeholder="A haunted lighthouse where the keeper never left. A flooded crypt. A neon city in decay..."
+                  ${c.busy ? "disabled" : ""}>${escapeHtml(c.quickPrompt || "")}</textarea>
+        <button class="holo-btn primary forge-quick-begin" type="submit" ${c.busy ? "disabled" : ""}
+                title="Forge this world and begin playing">
+          ${icon("flame")}<span>${c.busy ? "Forging..." : "Begin"}</span>
+        </button>
+      </form>
+    </section>`;
+
+  // The original multi-turn chat, kept as a secondary path beneath the quick start. A
+  // <details> the player can expand; restored/in-progress sessions open it by default so
+  // a refresh lands them right back in their conversation.
+  const chatOpen = c.chatOpen || c.restored || c.messages.length > 1;
+  const chat = `
+    <details class="forge-chat" ${chatOpen ? "open" : ""}>
+      <summary class="forge-chat-summary">Or shape it with the world-builder chat</summary>
+      <div class="forge-thread" id="creatorThread">${restored}${messages}${thinking}</div>
+      <div class="forge-chat-bar">
+        ${c.error ? `<p class="forge-error">${escapeHtml(c.error)}</p>` : ""}
+        <form class="forge-form" data-form="creator">
+          <input name="creatorText" class="holo-input" autocomplete="off"
+                 placeholder="Describe your world: a haunted lighthouse, a flooded crypt, a neon city in decay..."
+                 ${c.busy ? "disabled" : ""} />
+          <button class="holo-btn" type="submit" ${c.busy ? "disabled" : ""}>${icon("send")}<span>Send</span></button>
+        </form>
+        <button class="holo-btn forge-begin" data-act="begin-adventure" ${c.busy || !c.ready ? "disabled" : ""}
+                title="${c.ready ? "Forge this world and begin" : "The world-builder unlocks this when your world is ready"}">
+          ${icon("flame")}<span>${c.busy ? "Summoning..." : c.ready ? "Begin the Adventure" : "Begin (not ready yet)"}</span>
+        </button>
+      </div>
+    </details>`;
+
   return `
     <div class="holo-stage forge-stage" data-stage>
       ${holoFx()}
@@ -195,22 +237,9 @@ export function renderCreator(state) {
       </header>
 
       <main class="forge-main">
-        <div class="forge-thread" id="creatorThread">${restored}${messages}${thinking}</div>
+        ${quickStart}
+        ${chat}
       </main>
-
-      <footer class="forge-bar">
-        ${c.error ? `<p class="forge-error">${escapeHtml(c.error)}</p>` : ""}
-        <form class="forge-form" data-form="creator">
-          <input name="creatorText" class="holo-input" autocomplete="off"
-                 placeholder="Describe your world: a haunted lighthouse, a flooded crypt, a neon city in decay..."
-                 ${c.busy ? "disabled" : ""} />
-          <button class="holo-btn" type="submit" ${c.busy ? "disabled" : ""}>${icon("send")}<span>Send</span></button>
-        </form>
-        <button class="holo-btn primary forge-begin" data-act="begin-adventure" ${c.busy || !c.ready ? "disabled" : ""}
-                title="${c.ready ? "Forge this world and begin" : "The world-builder unlocks this when your world is ready"}">
-          ${icon("flame")}<span>${c.busy ? "Summoning..." : c.ready ? "Begin the Adventure" : "Begin (not ready yet)"}</span>
-        </button>
-      </footer>
       ${c.finalizing ? renderCrafting() : ""}
     </div>`;
 }

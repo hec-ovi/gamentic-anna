@@ -60,3 +60,34 @@ def test_timeouts_are_never_retried(client, world, monkeypatch):
         client.post(f"/games/{gid}/action", json={"action": "I look around."})
     # one call from the interpreter (swallowed), one from the narrator: no retries
     assert calls["n"] == 2
+
+
+# ---------- structured-JSON output threads through (the no-tools path) ----------
+
+def _capture_post(monkeypatch):
+    """Mock httpx.post and return a dict that captures the JSON payload chat() sends."""
+    seen = {}
+
+    def _post(url, json=None, timeout=None, headers=None):
+        seen["payload"] = json
+        return _Resp()
+    monkeypatch.setattr(llm.httpx, "post", _post)
+    return seen
+
+
+def test_response_format_is_sent_on_the_no_tools_path(monkeypatch):
+    # quick_create's contract: structured-JSON output rides the HTTP payload as
+    # response_format even with no tools offered (this used to be impossible).
+    seen = _capture_post(monkeypatch)
+    llm.chat([{"role": "user", "content": "make a world"}],
+             response_format={"type": "json_object"})
+    assert seen["payload"]["response_format"] == {"type": "json_object"}
+    assert "tools" not in seen["payload"]                     # genuinely a tool-less call
+
+
+def test_no_response_format_means_no_field_unchanged_behavior(monkeypatch):
+    # backward-compat: a plain tool-less call still sends NO response_format key, exactly
+    # as before (the existing tests rely on this).
+    seen = _capture_post(monkeypatch)
+    llm.chat([{"role": "user", "content": "narrate"}])
+    assert "response_format" not in seen["payload"]
