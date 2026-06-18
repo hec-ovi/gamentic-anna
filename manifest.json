@@ -12,9 +12,9 @@
         "name": "play",
         "title": "Gamentic",
         "default": true,
-        "default_size": { "w": 480, "h": 760 },
+        "default_size": { "w": 1280, "h": 860 },
         "min_size": { "w": 360, "h": 560 },
-        "max_size": { "w": 1280, "h": 1400 },
+        "max_size": { "w": 1366, "h": 1400 },
         "resizable": true,
         "movable": true
       }

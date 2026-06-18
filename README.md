@@ -47,6 +47,12 @@ docker exec -it gamentic-anna anna-app login --host https://anna.partners --no-b
 Then play at http://localhost:5180. Full teardown (including the login and saved
 games): `docker compose down -v`.
 
+**Pick a model.** Anna serves whatever model is selected in your account (the LLM /
+Model Selection page). Self-hosted models tend to see more gateway (502) hiccups and
+ship smaller context windows; a Pro-tier model (the OpenRouter-backed options) is
+recommended for steadier responses, and it also gives better quality and far more
+context for long adventures.
+
 ## Layout
 
 ```

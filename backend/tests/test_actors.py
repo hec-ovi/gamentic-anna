@@ -114,6 +114,33 @@ def test_directed_say_routes_to_character_without_narrator_cue(client, fake_llm)
     assert "Mara" not in speakers                                  # only the addressed one
 
 
+def test_untargeted_name_in_say_cues_the_character(client, fake_llm):
+    """The dialogue fix: naming a present character in an UNtargeted say (no target,
+    no entity chip) routes to them via the same deterministic _address path a targeted
+    say uses - even when the narrator cues no one. This is what made a live 'greet Mara'
+    come back as narration before: with a real model narrating instead of calling
+    cue_character, only a deterministic _address makes the character actually speak."""
+    gid = _new(client, [_char("Jacker"), _char("Mara")])
+    fake_llm.narrator = llm.LLMReply(content="The tavern hums.")   # narrator cues NO ONE
+    fake_llm.character_replies = {"Mara": llm.LLMReply(content="\"Evening.\"")}
+    d = client.post(f"/games/{gid}/action",
+                    json={"segments": [{"type": "say", "text": "Good evening, Mara"}]}).json()
+    speakers = {b["speaker_name"] for b in d["beats"] if b["kind"] == "dialogue"}
+    assert "Mara" in speakers
+    assert "Jacker" not in speakers                                # only the one named in the line
+
+
+def test_untargeted_name_in_do_cues_the_character(client, fake_llm):
+    """A 'do' that names a present character ('greet Mara') cues them to react too,
+    without the narrator calling cue_character."""
+    gid = _new(client, [_char("Mara")])
+    fake_llm.narrator = llm.LLMReply(content="Dust drifts in the lamplight.")  # no cue
+    fake_llm.character_replies = {"Mara": llm.LLMReply(content="\"You again.\"")}
+    d = client.post(f"/games/{gid}/action",
+                    json={"segments": [{"type": "do", "text": "greet Mara warmly"}]}).json()
+    assert any(b["speaker_name"] == "Mara" and b["kind"] == "dialogue" for b in d["beats"])
+
+
 def test_spawn_character_appears_and_speaks(client, fake_llm):
     gid = _new(client, [_char("Mara")])
     fake_llm.narrator = llm.LLMReply(

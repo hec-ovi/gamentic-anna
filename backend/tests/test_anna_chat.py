@@ -42,8 +42,18 @@ def test_clean_tool_envelope_parses_into_toolcalls(anna):
     assert len(r.tool_calls) == 1
     assert r.tool_calls[0].name == "attack"
     assert r.tool_calls[0].arguments == {"target": "goblin"}
-    # OpenAI->MCP message mapping + the tool directive land in the sampling call
-    assert anna["kw"]["response_format"] == {"type": "json_object"}
+    # OpenAI->MCP message mapping + the tool directive land in the sampling call.
+    # Tools force Anna L2 strict structured output (the {prose, tool_calls} envelope),
+    # with json_object as the graceful downgrade for models without json_schema.
+    rf = anna["kw"]["response_format"]
+    assert rf["type"] == "json_schema"
+    assert rf["json_schema"]["strict"] is True
+    assert set(rf["json_schema"]["schema"]["required"]) == {"prose", "tool_calls"}
+    # arguments MUST be a string under strict mode (an open object invalidates the whole
+    # schema at the OpenAI-dialect provider Anna forwards to); the parser json.loads it.
+    args_schema = rf["json_schema"]["schema"]["properties"]["tool_calls"]["items"]["properties"]["arguments"]
+    assert args_schema["type"] == "string"
+    assert anna["kw"]["on_unsupported"] == "json_object"
     assert "attack" in anna["kw"]["system_prompt"]
     assert anna["kw"]["messages"][-1]["content"]["text"] == "hit it"
 
@@ -85,6 +95,60 @@ def test_no_tools_returns_prose_and_normalizes_length(anna):
     assert r.content == "narration"
     assert r.tool_calls == []
     assert r.finish_reason == "length"      # Anna's stopReason normalized for the engine
+
+
+def test_schema_rejection_downgrades_to_json_object(monkeypatch):
+    """If the host/provider rejects the strict json_schema (invalid-schema -32003/-32004,
+    or unsupported -32010), the tools turn must NOT fail: it retries once in json_object
+    mode and still parses. Also exercises arguments arriving as a JSON string."""
+    monkeypatch.setattr(hostbridge, "_channel",
+                        hostbridge.HostChannel(loop=None, sampling=None, image=None))
+
+    class _Err(Exception):
+        def __init__(self, code):
+            super().__init__(f"[{code}] provider error")
+            self.code = code
+
+    seen = []
+
+    def fake(**kw):
+        rf = kw.get("response_format") or {}
+        seen.append(rf.get("type"))
+        if rf.get("type") == "json_schema":
+            raise _Err(-32003)                     # provider rejects the strict schema
+        return _sampled('{"prose":"You strike.","tool_calls":'
+                        '[{"name":"attack","arguments":"{\\"target\\":\\"orc\\"}"}]}')
+
+    monkeypatch.setattr(hostbridge, "sample_sync", fake)
+    r = llm.chat([{"role": "user", "content": "hit it"}], tools=TOOLS)
+    assert seen == ["json_schema", "json_object"]               # downgraded, did not fail
+    assert r.content == "You strike."
+    assert r.tool_calls and r.tool_calls[0].name == "attack"
+    assert r.tool_calls[0].arguments == {"target": "orc"}       # JSON-string args parsed back
+
+
+def test_non_format_error_is_not_downgraded_but_propagates(monkeypatch):
+    """A transient gateway error (e.g. a 502, not a schema rejection) must NOT be turned
+    into a json_object retry that masks it; it propagates."""
+    monkeypatch.setattr(hostbridge, "_channel",
+                        hostbridge.HostChannel(loop=None, sampling=None, image=None))
+
+    class _Err(Exception):
+        def __init__(self, code, msg):
+            super().__init__(msg)
+            self.code = code
+            self.message = msg
+
+    n = {"calls": 0}
+
+    def fake(**kw):
+        n["calls"] += 1
+        raise _Err(-32000, "anna.partners | 502: Bad gateway")
+
+    monkeypatch.setattr(hostbridge, "sample_sync", fake)
+    with pytest.raises(Exception):
+        llm.chat([{"role": "user", "content": "x"}], tools=TOOLS)
+    assert n["calls"] == 1                                       # no downgrade retry on a 502
 
 
 def test_inactive_channel_does_not_take_the_native_path(monkeypatch):

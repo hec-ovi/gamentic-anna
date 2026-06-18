@@ -114,9 +114,64 @@ def chat(
 # Active only when running as an Anna Executa (app.hostbridge installs the channel).
 # Anna sampling has no OpenAI-style function-calling but DOES support structured JSON
 # output, so when tools are offered we ask the model for a {prose, tool_calls} envelope
-# (json_object mode) and parse it into the SAME LLMReply / ToolCall the engine already
-# consumes. Output length is never capped (see the no-output-cap rule); max_tokens is
-# the host's mandatory maximum (hostbridge.MAX_SAMPLING_TOKENS).
+# (strict json_schema, with a json_object downgrade) and parse it into the SAME
+# LLMReply / ToolCall the engine already consumes. Output length is never capped (see
+# the no-output-cap rule); max_tokens is the host's mandatory maximum
+# (hostbridge.MAX_SAMPLING_TOKENS).
+#
+# Why json_schema and not plain json_object: a real model left in json_object mode
+# narrates state changes ("you hook the rusted ring free") instead of emitting the
+# tool_call that mutates state. The strict schema FORCES the {prose, tool_calls} shape
+# at inference, so take_item/give_item/move_location/spawn_character/etc. actually fire.
+# Because Anna forwards the schema to the OpenAI dialect, STRICT mode applies: every
+# object must set additionalProperties:false and list all properties in `required`. A
+# free-form per-tool args object is therefore impossible; instead `arguments` is a JSON
+# STRING the parser json.loads back (exactly how OpenAI's own function calling carries
+# args). The engine still re-validates args against each tool's schema downstream.
+# Two-layer floor: a model with no structured output at all returns -32010 and
+# on_unsupported downgrades it to json_object; any OTHER schema rejection (-32003/-32004)
+# is caught in _anna_chat and retried once in json_object mode, so a tools turn degrades
+# instead of failing. The lenient parser reads the strict, the json_object, and the
+# raw-prose shapes, so nothing is dropped.
+
+# Anna L2 structured-output schema for the tool envelope. Strict mode (OpenAI dialect)
+# requires every object to set additionalProperties:false and list ALL its properties in
+# `required`; `arguments` is a JSON-encoded string, not an open object, so the schema is
+# valid. Tiny (well under Anna's 32KB / depth-8 / 512-node caps); name matches
+# ^[a-zA-Z0-9_-]{1,64}$.
+_TOOL_ENVELOPE_SCHEMA = {
+    "type": "json_schema",
+    "json_schema": {
+        "name": "tool_envelope",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["prose", "tool_calls"],
+            "properties": {
+                "prose": {"type": "string"},
+                "tool_calls": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["name", "arguments"],
+                        "properties": {
+                            "name": {"type": "string"},
+                            # A JSON object encoded as a STRING. Strict mode (which Anna
+                            # forwards to the OpenAI dialect) forbids an open object
+                            # (additionalProperties:true invalidates the whole schema),
+                            # so we carry per-tool args the way OpenAI's own function
+                            # calling does - a JSON string the parser json.loads back.
+                            "arguments": {"type": "string",
+                                          "description": "A JSON object of the tool's arguments, encoded as a string."},
+                        },
+                    },
+                },
+            },
+        },
+    },
+}
 
 
 def _flatten(content) -> str:
@@ -164,8 +219,20 @@ def _tools_directive(tools: list[dict]) -> str:
         name = tools[0].get("function", tools[0]).get("name", "")
         lines.append(f'You MUST call "{name}" with valid arguments.')
     else:
-        lines.append('Include a tool call only when it genuinely applies; otherwise use an '
-                     'empty list. Put every player-facing word in "prose".')
+        # The model will happily NARRATE a state change in prose and leave tool_calls
+        # empty (json_schema forces the shape, not a non-empty list). Make the contract
+        # explicit and show it, or mechanical effects silently never happen.
+        lines.append(
+            'CRITICAL: "prose" is ONLY atmosphere and what the player perceives. EVERY '
+            'concrete change to the world MUST be a tool call, never described in prose '
+            'alone: an item taken, placed, revealed or given; moving to a location; '
+            'damage or healing; a present character speaking or reacting; a new character '
+            'appearing; a quest, goal, item or scene '
+            'change. If your prose states that something happened, the matching tool call '
+            'MUST appear in "tool_calls". Use an empty "tool_calls" list ONLY for pure '
+            'description with no state change. '
+            'Example: {"prose": "You pry the rusted key from the silt and pocket it.", '
+            '"tool_calls": [{"name": "take_item", "arguments": {"item": "rusted key"}}]}')
     return "\n".join(lines)
 
 
@@ -207,11 +274,26 @@ def _anna_chat(messages, tools, tool_choice, temperature, stop) -> LLMReply:
     if tools:
         directive = _tools_directive(tools)
         system_prompt = f"{system_prompt}\n\n{directive}" if system_prompt else directive
-        response_format = {"type": "json_object"}
-    result = hostbridge.sample_sync(
-        messages=mcp, system_prompt=system_prompt, temperature=temperature,
-        stop_sequences=stop or None, response_format=response_format,
-        on_unsupported="json_object" if response_format else None)
+        response_format = _TOOL_ENVELOPE_SCHEMA
+
+    def _sample(rf):
+        return hostbridge.sample_sync(
+            messages=mcp, system_prompt=system_prompt, temperature=temperature,
+            stop_sequences=stop or None, response_format=rf,
+            on_unsupported="json_object" if rf else None)
+
+    try:
+        result = _sample(response_format)
+    except Exception as exc:
+        # on_unsupported only covers a model with NO structured output (-32010). A schema
+        # the provider rejects as invalid surfaces as -32003/-32004 (or names "schema"),
+        # which it does NOT cover - so retry ONCE in plain json_object mode rather than
+        # failing the turn (the directive still shapes the envelope; the parser reads it).
+        code = getattr(exc, "code", None)
+        fmt_error = code in (-32003, -32004, -32010) or "schema" in f"{getattr(exc, 'message', '')} {exc}".lower()
+        if response_format is None or not fmt_error:
+            raise
+        result = _sample({"type": "json_object"})
     content = result.get("content") or {}
     text = content.get("text", "") if isinstance(content, dict) else _flatten(content)
     usage = _map_usage(result.get("usage"))

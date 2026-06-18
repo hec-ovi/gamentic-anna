@@ -53,6 +53,22 @@ def _compose(segments, conn=None, gid: str | None = None) -> tuple[str, list[dic
     conn/gid let _display resolve a bare id (no entity chip) against the DB, so the give
     picker's {item:'<id>', target:'<name>'} echoes the item NAME, never the raw id."""
     parts, directed = [], []
+    # Resolve a present character NAMED in untagged text ("greet Mara", a say with no
+    # chip) so addressing one routes through the same deterministic _address path a
+    # tagged say uses - cueing them to speak - instead of leaving it to the narrator's
+    # soft cue, which a real model often answers as narration so the character never
+    # speaks. Whole-name, case-insensitive, present+alive only (enqueue re-checks).
+    present = (repo.present_characters(conn, gid, repo.get_player(conn, gid)["location"])
+               if conn is not None and gid else [])
+
+    def _named(txt):
+        low = (txt or "").lower()
+        for ch in present:
+            nm = (ch["name"] or "").strip().lower()
+            if nm and re.search(rf"\b{re.escape(nm)}\b", low):
+                return ch["id"]
+        return None
+
     for s in segments:
         t = (s.get("type") or "do").lower()
         text = (s.get("text") or "").strip()
@@ -67,6 +83,8 @@ def _compose(segments, conn=None, gid: str | None = None) -> tuple[str, list[dic
                             None)
                 if chip:
                     target = chip.get("id") or chip.get("name")
+            if not target:
+                target = _named(text)        # a name spoken inside the line addresses them
             parts.append(f'you say "{text}"' + (f" to {_display(s, target, conn, gid)}" if target else ""))
             if target:
                 directed.append({"tool": "_address", "args": {"target": target}})
@@ -101,6 +119,9 @@ def _compose(segments, conn=None, gid: str | None = None) -> tuple[str, list[dic
                 parts.append("you look around")
         else:  # do
             parts.append(text or "you wait")
+            addr = _named(text)              # "greet Mara" / "nod to Garrok" cues them too
+            if addr:
+                directed.append({"tool": "_address", "args": {"target": addr}})
     return "; ".join(p for p in parts if p), directed
 
 

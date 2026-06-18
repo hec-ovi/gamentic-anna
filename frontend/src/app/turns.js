@@ -5,7 +5,7 @@ import { mapBeats, mapGameState } from "../adapters.js";
 import { diffState } from "../transitions.js";
 import { api, root, state } from "./ctx.js";
 import { applyTransitions, showToast } from "./cues.js";
-import { pullBeats } from "./mediastream.js";
+import { pullBeats, pollBurst } from "./mediastream.js";
 import { refreshProfile } from "./profilectl.js";
 import { startReveal } from "./reveal.js";
 import { withVoice } from "./speech.js";
@@ -167,6 +167,9 @@ export async function resolveTurn(g, send, { look = false, echo = null, restore 
       g.pullOwed = false;
       pullBeats(g); // a media-ready event fired mid-turn; settle the debt now
     }
+    // under Anna (no SSE), the turn's art renders after the reply; poll a short
+    // decaying burst so it appears in seconds rather than at the 60s fallback sweep
+    if (!failed) pollBurst(g);
     if (g.profile) refreshProfile(g); // the open profile reflects the new turn
     refocusComposer(g); // the lock lifted: hand the keyboard straight back
   }

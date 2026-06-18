@@ -71,6 +71,24 @@ export function stopMediaWatch() {
   dropped = false;
 }
 
+// Post-turn art pickup under Anna. There is no SSE there (the sandboxed iframe cannot
+// reach /events and the executa runs no HTTP listener), and the engine now renders a
+// turn's art AFTER the reply returns (fire-and-forget), so the art lands in the seconds
+// that follow. Poll a short, decaying burst to slot it in promptly instead of waiting
+// up to the 60s fallback sweep. No-op outside Anna, where the EventSource push covers it.
+const BURST_DELAYS = [1200, 2500, 4500, 7000, 11000, 16000, 24000, 34000, 46000];
+
+export function pollBurst(g) {
+  if (!g || !state.annaMode) return;
+  for (const ms of BURST_DELAYS) {
+    setTimeout(() => {
+      if (state.active !== g || state.view !== "play") return;
+      refreshArt(g);
+      pullBeats(g);
+    }, ms);
+  }
+}
+
 // One-shot /state refetch: slot late-arriving art in (scene image, portraits).
 // Never clobbers fresh post-turn state: the turn's own response wins.
 export async function refreshArt(g) {

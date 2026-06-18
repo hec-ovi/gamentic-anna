@@ -12,7 +12,9 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 
-from . import db, repo, engine, creator, integrate, media, prompts, llm, constants, transfer
+from concurrent.futures import ThreadPoolExecutor
+
+from . import db, repo, engine, creator, integrate, media, prompts, llm, constants, transfer, hostbridge
 from .integrate import events as game_events
 from .config import settings
 from .providers import resolve, voice_enabled
@@ -38,6 +40,25 @@ app.add_middleware(
 )
 
 
+# Post-response jobs (art renders, summary folds, origin enrichment) are scheduled
+# through here. Outside an Anna Executa they run as Starlette BackgroundTasks, which
+# fire AFTER the response under uvicorn (correct, and what every test exercises). But
+# under the Executa transport (httpx ASGITransport) BackgroundTasks are awaited INSIDE
+# the invoke, so a turn would not return until all its art rendered (1 to 3 min each) -
+# long enough that the Anna dev harness tears the executa down ("executa process
+# exited"). So as an Executa we dispatch them FIRE-AND-FORGET on a small pool: prose
+# returns in seconds and late images are picked up by the frontend's /beats?since= and
+# /state polling. The jobs open their own DB connections, so detaching is safe.
+_DETACHED = ThreadPoolExecutor(max_workers=4, thread_name_prefix="art")
+
+
+def _schedule(background_tasks: BackgroundTasks, fn, *args) -> None:
+    if hostbridge.active():
+        _DETACHED.submit(fn, *args)
+    else:
+        background_tasks.add_task(fn, *args)
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -52,13 +73,13 @@ def create_game(sheet: WorldSheet, background_tasks: BackgroundTasks):
         scene_id = repo.current_scene(conn, gid)["id"]
     # origins first: fast text calls, and the narrator's first turns deserve real pasts;
     # the slow image renders queue behind them
-    background_tasks.add_task(creator.enrich_origins, gid)
+    _schedule(background_tasks, creator.enrich_origins, gid)
     # First-sight art is ONE composed pass (integrate.generate_creation_art): the art
     # director writes the prompts from the whole world bible, then the owner's render
     # order holds - portraits first (identity references), seeded item cards, the main
     # opening image last, delivered by SSE the moment each lands.
     if settings.IMAGE_ENABLED:                               # images are optional
-        background_tasks.add_task(integrate.generate_creation_art, gid, scene_id)
+        _schedule(background_tasks, integrate.generate_creation_art, gid, scene_id)
     return {"game_id": gid}
 
 
@@ -112,11 +133,11 @@ def import_game(payload: dict, background_tasks: BackgroundTasks):
         scene = repo.current_scene(conn, gid)
         need_scene_art = settings.IMAGE_ENABLED and not scene["image_url"]
         scene_id = scene["id"]
-    background_tasks.add_task(creator.enrich_origins, gid)   # imported templates may be thin too
+    _schedule(background_tasks, creator.enrich_origins, gid)   # imported templates may be thin too
     if settings.IMAGE_ENABLED:
-        background_tasks.add_task(integrate.generate_images_for_game, gid)  # missing portraits
+        _schedule(background_tasks, integrate.generate_images_for_game, gid)  # missing portraits
     if need_scene_art:
-        background_tasks.add_task(integrate.generate_scene_image, gid, scene_id)
+        _schedule(background_tasks, integrate.generate_scene_image, gid, scene_id)
     return {"game_id": gid}
 
 
@@ -264,19 +285,19 @@ def _resolved_turn(gid: str, background_tasks: BackgroundTasks, text: str = "",
             c["alive"] and not repo.character_has_images(c)
             for c in repo.get_characters(conn, gid))
     if settings.IMAGE_ENABLED and (result.get("spawned") or need_portraits):
-        background_tasks.add_task(integrate.generate_images_for_game, gid)  # portraits (background)
+        _schedule(background_tasks, integrate.generate_images_for_game, gid)  # portraits (background)
     if need_scene_art:
-        background_tasks.add_task(integrate.generate_scene_image, gid, scene_id)  # new-scene art
+        _schedule(background_tasks, integrate.generate_scene_image, gid, scene_id)  # new-scene art
     shot = result.pop("image_request", None)                 # the narrator's show_image call
     if settings.IMAGE_ENABLED and shot:
-        background_tasks.add_task(integrate.generate_directed_image, gid,
+        _schedule(background_tasks, integrate.generate_directed_image, gid,
                                   shot["description"], shot["caption"])
     fallback = result.pop("view_fallback", None)             # a look the narrator didn't render
     if settings.IMAGE_ENABLED and fallback is not None:
-        background_tasks.add_task(integrate.generate_view_snapshot, gid, fallback or None)
+        _schedule(background_tasks, integrate.generate_view_snapshot, gid, fallback or None)
     for cid, focus in result.pop("private_looks", []):       # quiet studies -> private thread
         if settings.IMAGE_ENABLED:
-            background_tasks.add_task(integrate.generate_view_snapshot, gid, focus, cid)
+            _schedule(background_tasks, integrate.generate_view_snapshot, gid, focus, cid)
     new_items = result.pop("new_items", None) or []          # items newly visible this turn
     if settings.IMAGE_ENABLED and settings.IMAGE_ITEMS:
         # self-heal like portraits: pick up items whose card never rendered (per-turn cap
@@ -288,11 +309,11 @@ def _resolved_turn(gid: str, background_tasks: BackgroundTasks, text: str = "",
                            and v["name"] not in [n["name"] for n in new_items]]
             new_items = new_items + missing
         for it in new_items[: settings.IMAGE_MAX_ITEMS_PER_TURN]:
-            background_tasks.add_task(integrate.generate_item_image, gid, it["name"])
+            _schedule(background_tasks, integrate.generate_item_image, gid, it["name"])
     if settings.SUMMARY_ENABLED:
-        background_tasks.add_task(engine.maybe_update_summary, gid)  # fold old chapters
+        _schedule(background_tasks, engine.maybe_update_summary, gid)  # fold old chapters
     if settings.CHAR_SUMMARY_ENABLED:
-        background_tasks.add_task(engine.maybe_update_character_summaries, gid)  # per-character folds
+        _schedule(background_tasks, engine.maybe_update_character_summaries, gid)  # per-character folds
     return result
 
 
@@ -474,10 +495,10 @@ def create_finalize(body: dict, background_tasks: BackgroundTasks):
             scene_id = repo.current_scene(conn, gid)["id"]
     except ValueError as e:
         raise HTTPException(409, str(e))
-    background_tasks.add_task(creator.enrich_origins, gid)   # thin backstories get real ones
+    _schedule(background_tasks, creator.enrich_origins, gid)   # thin backstories get real ones
     # same first-sight pass as POST /games: the art director writes the prompts, then
     # portraits (identity refs), seeded item cards, the main opening image (SSE
     # delivers each the moment it lands)
     if settings.IMAGE_ENABLED:
-        background_tasks.add_task(integrate.generate_creation_art, gid, scene_id)
+        _schedule(background_tasks, integrate.generate_creation_art, gid, scene_id)
     return {"game_id": gid}
