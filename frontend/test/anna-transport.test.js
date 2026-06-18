@@ -75,6 +75,28 @@ describe("anna executa transport", () => {
     expect(err).toMatchObject({ name: "ApiError", status: 502 });
     expect(err.message).toMatch(/usage limit/i);
   });
+
+  // The Anna dev harness recycles the executa on its own; an idempotent GET caught mid-recycle
+  // (a dropped invoke -> tool-level 502, or a transport hang -> status 0) must be retried, not
+  // bounced. This is what keeps resume from kicking the player back to the menu.
+  it("retries a GET through a dropped invoke (executa recycle) and then succeeds", async () => {
+    let n = 0;
+    const invoke = vi.fn(async () => {
+      n += 1;
+      if (n < 3) return { success: false, error: "[-32002] executa process exited" };
+      return { status: 200, json: { state: { ok: 1 } } };
+    });
+    const api = createApi("x", { invoke });
+    await expect(api.getState("g1")).resolves.toEqual({ state: { ok: 1 } });
+    expect(invoke).toHaveBeenCalledTimes(3);
+  });
+
+  it("does NOT retry a POST turn through a failure (not idempotent)", async () => {
+    const invoke = vi.fn(async () => ({ success: false, error: CF_502 }));
+    const api = createApi("x", { invoke });
+    await api.takeAction("g1", "x").catch(() => {});
+    expect(invoke).toHaveBeenCalledTimes(1);
+  });
 });
 
 // The synchronous window detector that lets boot switch to Anna mode on the first

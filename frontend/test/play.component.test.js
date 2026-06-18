@@ -103,6 +103,8 @@ test("PARTIAL lock: mutating surfaces block mid-turn, but the lightbox and inspe
   // a character with face art + a past dialogue beat, so an avatar image exists
   const faced = makeState();
   faced.characters[0].face_url = "/media/g-test/jacker-face.png";
+  // a non-look scene action that DOES render (look/search are filtered out now)
+  faced.scene.available_actions = [{ id: "a0", label: "Pry the bar", type: "do" }];
   server.use(
     http.get(`${API}/games/:id/state`, () => HttpResponse.json(faced)),
     http.get(`${API}/games/:id/beats`, ({ request }) =>
@@ -130,9 +132,9 @@ test("PARTIAL lock: mutating surfaces block mid-turn, but the lightbox and inspe
   expect(cmpBox().getAttribute("contenteditable")).toBe("false");
   expect(screen.getByText(/the narrator is thinking/i)).toBeTruthy();
   expect(document.querySelector(".busy-veil")).toBeNull();
-  const search = screen.getByRole("button", { name: /^search$/i });
-  expect(search.disabled).toBe(true);
-  await u.click(search).catch(() => {});
+  const sceneAct = screen.getByRole("button", { name: /pry the bar/i });
+  expect(sceneAct.disabled).toBe(true);
+  await u.click(sceneAct).catch(() => {});
 
   // ...but READ-ONLY interactions still work: the dialogue avatar opens the lightbox
   await u.click(document.querySelector('.dialogue .bubble-avatar'));
@@ -686,42 +688,22 @@ test("the speak button walks loading -> playing -> back to idle", async () => {
   expect(btn.getAttribute("aria-label")).toMatch(/play voice/i);
 });
 
-test("Look from the whisper panel is PRIVATE: whisper mode:'look' on the wire, nothing leaks into the public story", async () => {
+test("the whisper panel no longer offers a Look mode (look disabled)", async () => {
   const u = user();
-  let body;
-  server.use(
-    http.post(`${API}/games/:id/action`, async ({ request }) => {
-      body = await request.json();
-      // the echo and the prose come back PRIVATE (private_with set), per item K
-      return HttpResponse.json({
-        beats: [
-          makeBeat({ id: "lk-e", kind: "action", speaker: "player", text: "you quietly study Jacker", private_with: "c1" }),
-          makeBeat({ id: "lk-n", kind: "narration", text: "His scar catches the light.", private_with: "c1" }),
-        ],
-        state: makeState(),
-      });
-    }),
-  );
   await gotoPlay(u);
   await u.click(screen.getByRole("button", { name: /open jacker's profile/i }));
   await screen.findByRole("dialog", { name: /jacker's profile/i });
   await waitFor(() => expect(within(profileEl()).getByRole("tab", { name: /whisper/i })).toBeTruthy());
   await u.click(within(profileEl()).getByRole("tab", { name: /whisper/i }));
-  await waitFor(() => expect(within(profileEl()).getByRole("button", { name: /^look$/i })).toBeTruthy());
+  await waitFor(() => expect(pmBox(/what you say/i)).toBeTruthy());
 
-  await u.click(within(profileEl()).getByRole("button", { name: /^look$/i }));
-  await u.type(pmBox(/what you look at/i), "his scar");
-  await u.click(within(profileEl()).getByRole("button", { name: /^whisper$/i }));
-  await waitFor(() => expect(body).toBeTruthy());
-  // the spec'd PRIVATE wire shape (fe-work-order item 13 [K]), never a public look
-  expect(body.segments).toEqual([{ type: "whisper", mode: "look", target: "Jacker", text: "his scar" }]);
-
-  // the study renders in the thread...
-  await waitFor(() => expect(within(document.querySelector("#pmThread")).getByText(/scar catches the light/)).toBeTruthy(), { timeout: 4000 });
-  // ...and NEVER in the public story (neither the prose nor the player echo)
-  const story = document.querySelector("#storyStream");
-  expect(within(story).queryByText(/scar catches the light/)).toBeNull();
-  expect(within(story).queryByText(/quietly study/)).toBeNull();
+  // the whisper composer offers ONLY do/say: there is no Look mode button...
+  expect(within(profileEl()).queryByRole("button", { name: /^look$/i })).toBeNull();
+  expect(profileEl().querySelector('[data-act="pm-mode"][data-mode="look"]')).toBeNull();
+  expect(within(profileEl()).getByRole("button", { name: /^say$/i })).toBeTruthy();
+  expect(within(profileEl()).getByRole("button", { name: /^do$/i })).toBeTruthy();
+  // ...and no "what you look at" textbox can be reached
+  expect(within(profileEl()).queryByRole("textbox", { name: /what you look at/i })).toBeNull();
 }, 10000);
 
 test("the profile composer's Do mode whispers a discreet private action (mode: do)", async () => {
@@ -793,11 +775,19 @@ test("a turn that reveals an exit shows a transition notice and the exit becomes
       exits: [{ id: "e1", label: "the back room", target: "back" }],
     },
   });
+  // the scene starts with a normal (non-look) action to fire the turn
+  const start = makeState({
+    scene: {
+      id: "sc1", name: "The Last Breath", description: "d", status: "tense",
+      items: [], exits: [], available_actions: [{ id: "a0", label: "Force the panel", type: "do" }],
+    },
+  });
   server.use(
+    http.get(`${API}/games/:id/state`, () => HttpResponse.json(start)),
     http.post(`${API}/games/:id/action`, () => HttpResponse.json({ beats: [makeBeat({ text: "A door clicks." })], state: moved })),
   );
   await gotoPlay(u);
-  await u.click(screen.getByRole("button", { name: /^search$/i }));
+  await u.click(screen.getByRole("button", { name: /force the panel/i }));
   // notice fires for the newly revealed way out
   expect(await screen.findByText(/A way opens: the back room/i)).toBeTruthy();
   // and the exit is now a button
@@ -843,69 +833,64 @@ const IMAGED = () =>
     scene: { id: "sc1", name: "The Last Breath", description: "d", status: "tense", image_url: "/media/g/scene.png", exits: [], items: [], available_actions: [] },
   });
 
-test("Look is a first-class action: the typed focus sends a look segment", async () => {
+test("the play composer offers no Look mode (look disabled): only do/say", async () => {
+  const u = user();
+  await gotoPlay(u);
+  // the composer's mode row has do and say, but no Look button or look mode node
+  expect(screen.queryByRole("button", { name: /^look$/i })).toBeNull();
+  expect(document.querySelector('[data-act="cmp-mode"][data-mode="look"]')).toBeNull();
+  expect(screen.getByRole("button", { name: /^do$/i })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^say$/i })).toBeTruthy();
+  // and there is no "what you look at" line to type into
+  expect(screen.queryByRole("textbox", { name: /what you look at/i })).toBeNull();
+});
+
+test("scene actions of type look/search are NOT rendered; a normal action still fires its turn", async () => {
   const u = user();
   let body;
+  const withActs = makeState({
+    scene: {
+      id: "sc1", name: "The Last Breath", description: "d", status: "tense",
+      items: [], exits: [],
+      available_actions: [
+        { id: "s0", label: "Look around", type: "look" },
+        { id: "s1", label: "Search", type: "search" },
+        { id: "a0", label: "Pry the bar", type: "do" },
+      ],
+    },
+  });
   server.use(
+    http.get(`${API}/games/:id/state`, () => HttpResponse.json(withActs)),
     http.post(`${API}/games/:id/action`, async ({ request }) => {
       body = await request.json();
-      return HttpResponse.json({ beats: [makeBeat({ text: "You study the hatch." })], state: makeState() });
+      return HttpResponse.json({ beats: [makeBeat({ text: "ok" })], state: withActs });
     }),
   );
   await gotoPlay(u);
-  await u.click(screen.getByRole("button", { name: /^look$/i }));
-  await u.type(cmpBox(), "the rusted hatch");
-  await u.click(screen.getByRole("button", { name: /send/i }));
+  // the look/search base actions are filtered out of the deck
+  expect(screen.queryByRole("button", { name: /look around/i })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^search$/i })).toBeNull();
+  // the normal action renders and fires a turn
+  await u.click(screen.getByRole("button", { name: /pry the bar/i }));
   await waitFor(() => expect(body).toBeTruthy());
-  expect(body.segments).toEqual([{ type: "look", text: "the rusted hatch" }]);
-  await screen.findByText("You study the hatch.");
+  await screen.findByText("ok");
 });
 
-test("an EMPTY Look line still sends (study the whole scene)", async () => {
-  const u = user();
-  let body;
-  server.use(
-    http.post(`${API}/games/:id/action`, async ({ request }) => {
-      body = await request.json();
-      return HttpResponse.json({ beats: [makeBeat({ text: "The room sharpens." })], state: makeState() });
-    }),
-  );
-  await gotoPlay(u);
-  await u.click(screen.getByRole("button", { name: /^look$/i }));
-  await u.click(screen.getByRole("button", { name: /send/i }));
-  await waitFor(() => expect(body).toBeTruthy());
-  expect(body.segments).toEqual([{ type: "look", text: "" }]);
-});
-
-test("the scene base actions rewire: 'Look around' and 'Search' send look segments", async () => {
-  const u = user();
-  const bodies = [];
-  server.use(
-    http.post(`${API}/games/:id/action`, async ({ request }) => {
-      bodies.push(await request.json());
-      return HttpResponse.json({ beats: [makeBeat({ text: "ok" })], state: makeState() });
-    }),
-  );
-  await gotoPlay(u);
-  await u.click(screen.getByRole("button", { name: /look around/i }));
-  await waitFor(() => expect(bodies.length).toBe(1));
-  expect(bodies[0].segments).toEqual([{ type: "look", text: "" }]);
-  await waitFor(composerLive);
-  await u.click(screen.getByRole("button", { name: /^search$/i }));
-  await waitFor(() => expect(bodies.length).toBe(2));
-  expect(bodies[1].segments).toEqual([{ type: "look", text: "for anything hidden or useful here" }]);
-});
-
-test("after a look turn, the SSE beat event pulls the late images in and the rendering hint resolves", async () => {
+test("after a turn, the SSE beat event pulls the late images in", async () => {
   const u = user();
   vi.stubGlobal("EventSource", FakeEventSource);
   const intoView = vi.fn();
   Element.prototype.scrollIntoView = intoView; // jsdom has none; the arrival MUST scroll
   let imagesReady = false;
+  const imagedActs = () => {
+    const s = IMAGED();
+    s.scene.available_actions = [{ id: "a0", label: "Pry the bar", type: "do" }];
+    return s;
+  };
   server.use(
-    http.get(`${API}/games/:id/state`, () => HttpResponse.json(IMAGED())),
+    http.get(`${API}/games/:id/state`, () => HttpResponse.json(imagedActs())),
     http.post(`${API}/games/:id/action`, () =>
-      HttpResponse.json({ beats: [makeBeat({ id: "lk1", turn_index: 2, text: "You take it all in." })], state: IMAGED() }),
+      HttpResponse.json({ beats: [makeBeat({ id: "lk1", turn_index: 2, text: "You take it all in." })], state: imagedActs() }),
     ),
     http.get(`${API}/games/:id/beats`, ({ request }) => {
       const since = new URL(request.url).searchParams.get("since");
@@ -923,12 +908,8 @@ test("after a look turn, the SSE beat event pulls the late images in and the ren
     }),
   );
   await gotoPlay(u);
-  await u.click(screen.getByRole("button", { name: /^look$/i }));
-  await u.click(screen.getByRole("button", { name: /send/i }));
+  await u.click(screen.getByRole("button", { name: /pry the bar/i }));
   await screen.findByText("You take it all in.");
-
-  // the subtle hint shows while the look image renders in the background
-  await waitFor(() => expect(document.querySelector(".render-hint")).toBeTruthy());
 
   // the backend announces the persisted beat; the app pulls GET /beats?since=
   imagesReady = true;
@@ -948,8 +929,6 @@ test("after a look turn, the SSE beat event pulls the late images in and the ren
     expect(card.classList.contains("item-card")).toBe(true);
     expect(card.querySelector("figcaption").textContent).toMatch(/brass key/);
   });
-  // and the hint resolves once the image arrives
-  await waitFor(() => expect(document.querySelector(".render-hint")).toBeNull());
   vi.unstubAllGlobals();
   FakeEventSource.instances.length = 0;
   delete Element.prototype.scrollIntoView;
@@ -1412,7 +1391,7 @@ test("turn pacing: the two selects PATCH turn_voices / turn_acts; Default sends 
   await waitFor(() => expect(patches).toContainEqual({ turn_acts: 0 }));
 });
 
-test("no SSE: the hint never expires and the 60s fallback sweep still pulls the guaranteed image", async () => {
+test("no SSE: the 60s fallback sweep still pulls the late guaranteed image", async () => {
   const u = user();
   const realSetTimeout = globalThis.setTimeout;
   const realTick = (ms = 10) => new Promise((r) => realSetTimeout(r, ms));
@@ -1422,7 +1401,10 @@ test("no SSE: the hint never expires and the 60s fallback sweep still pulls the 
     http.post(`${API}/games/:id/action`, () =>
       HttpResponse.json({
         beats: [makeBeat({ id: "lk1", text: "You peer into the wreck.", turn_index: 7 })],
-        state: makeState({ images_enabled: true }),
+        state: makeState({ images_enabled: true, scene: {
+          id: "sc1", name: "The Last Breath", description: "d", status: "tense",
+          items: [], exits: [], available_actions: [{ id: "a0", label: "Pry the bar", type: "do" }],
+        } }),
       }),
     ),
     http.get(`${API}/games/:id/beats`, ({ request }) => {
@@ -1446,12 +1428,10 @@ test("no SSE: the hint never expires and the 60s fallback sweep still pulls the 
     const { watchMedia } = await import("../src/app/mediastream.js");
     watchMedia(app.state.active);
 
-    // fire the look natively (user-event sleeps don't mix with a fake clock)
-    document.querySelector('[data-act="cmp-mode"][data-mode="look"]').click();
-    document.querySelector("#cmpInput").textContent = "the wreck";
+    // fire a normal turn natively (user-event sleeps don't mix with a fake clock)
+    document.querySelector("#cmpInput").textContent = "peer into the wreck";
     document.querySelector('[data-form="action"]').dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
     await realTick(30); // let the POST resolve through MSW
-    expect(document.querySelector(".render-hint")).toBeTruthy();
 
     const sweep = async (fakeMs) => {
       for (let s = 0; s < fakeMs; s += 30000) {
@@ -1460,14 +1440,14 @@ test("no SSE: the hint never expires and the 60s fallback sweep still pulls the 
       }
     };
 
-    // a minute of silence: the sweep polled once, the hint is STILL there
+    // a minute of silence: the sweep polled once, no late image yet
     await sweep(61000);
     expect(polls.length).toBeGreaterThanOrEqual(1);
-    expect(document.querySelector(".render-hint")).toBeTruthy();
+    expect(document.querySelector('#storyStream [data-beat-id="lk-img"]')).toBeNull();
 
-    // five more minutes of silence: still no lie, the hint holds
+    // five more minutes of silence: the sweep keeps polling, still nothing to show
     await sweep(300000);
-    expect(document.querySelector(".render-hint")).toBeTruthy();
+    expect(document.querySelector('#storyStream [data-beat-id="lk-img"]')).toBeNull();
 
     // the render finally lands: the next sweep swaps it in place
     lateImage = makeBeat({
@@ -1475,7 +1455,6 @@ test("no SSE: the hint never expires and the 60s fallback sweep still pulls the 
       image_url: "/media/g-test/look.png", text: "The wreck up close, hull torn open.",
     });
     await sweep(61000);
-    expect(document.querySelector(".render-hint")).toBeNull();
     expect(document.querySelector('#storyStream [data-beat-id="lk-img"] img')).toBeTruthy();
   } finally {
     vi.useRealTimers();
@@ -1762,7 +1741,7 @@ test("joining a game seats you at the keyboard (composer focused)", async () => 
 // to the whisper of that person ... i am redirected there")
 // ---------------------------------------------------------------------------
 
-test("after a GIVE resolves, the player lands in the receiver's whisper thread with the private reply", async () => {
+test("after a GIVE resolves, popups close and the player is back on the main screen", async () => {
   const u = user();
   const carrying = makeState({
     player: { inventory: [{ id: "inv1", name: "credstick", description: "42 creds", qty: 1 }] },
@@ -1789,14 +1768,14 @@ test("after a GIVE resolves, the player lands in the receiver's whisper thread w
   // pick the item from the slot-grid picker
   await u.click(await screen.findByRole("button", { name: /^credstick$/i }));
 
-  // the turn resolves and we are REDIRECTED into Jacker's whisper thread:
-  // the profile dialog is open, the Whisper tab is selected...
-  await waitFor(() => {
-    const active = within(profileEl()).getByRole("tab", { selected: true });
-    expect(active.textContent).toMatch(/whisper/i);
-  }, { timeout: 4000 });
-  // ...and the private reply is visible in the thread
-  await waitFor(() => expect(within(document.querySelector("#pmThread")).getByText("I owe you for this.")).toBeTruthy(), { timeout: 4000 });
+  // the turn resolves and ALL popups close: back on the main play deck,
+  // no profile/whisper open, no give picker, no inspect sheet
+  await waitFor(() => expect(document.querySelector(".profile-screen")).toBeNull(), { timeout: 4000 });
+  expect(document.querySelector("#pmThread")).toBeNull();
+  expect(document.querySelector("#pmInput")).toBeNull();
+  expect(document.querySelector(".give-items")).toBeNull();
+  expect(document.querySelector(".play-deck")).toBeTruthy();
+  expect(screen.getAllByText("The Last Breath").length).toBeGreaterThan(0);
 }, 10000);
 
 // ---------------------------------------------------------------------------

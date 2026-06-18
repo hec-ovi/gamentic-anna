@@ -168,7 +168,7 @@ function actionsSection(d, stateChar, locked, presence) {
         <p class="absence-line">${escapeHtml(absenceLine(d, stateChar, presence.alive))}</p>
       </section>`;
   }
-  const actions = ((stateChar && stateChar.actions) || []).filter((a) => a.type !== "talk");
+  const actions = ((stateChar && stateChar.actions) || []).filter((a) => a.type !== "talk" && a.type !== "look" && a.type !== "search");
   if (!actions.length) return "";
   return `
     <section class="profile-sec">
@@ -268,11 +268,10 @@ export function renderWhisperChannel(s, g, d, locked) {
            id: "pm",
            mode: pf.mode,
            locked,
-           modes: ["say", "do", "look"],
+           modes: ["say", "do"],
            placeholders: {
              say: `Whisper to ${name}...`,
              do: `A discreet act only ${name} notices...`,
-             look: `Look at what? (${name}, a detail, the room...)`,
            },
            submitLabel: locked ? "Resolving..." : "Whisper",
          })}

@@ -2,6 +2,7 @@
 
 import { sameLocation } from "../adapters.js";
 import { icon } from "../icons.js";
+import { state as appState } from "../app/ctx.js";
 import { cardCorners, escapeHtml, stripWrappingQuotes } from "./common.js";
 import { artImg, artLoading, avatarOrInitials, veilWrap } from "./widgets.js";
 
@@ -234,6 +235,8 @@ export function renderSystem(beat) {
 }
 
 export function speakBtn(beat) {
+  // Voice is off on Anna (no host TTS), so the speaker icon would never play - hide it.
+  if (appState.annaMode) return "";
   return `<button type="button" class="speak-btn" data-act="speak-beat" data-beat-id="${escapeHtml(beat.id)}" aria-label="Play voice" title="Play voice">${icon("volume2")}</button>`;
 }
 

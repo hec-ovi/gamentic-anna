@@ -29,6 +29,19 @@ Anna AI-Native App Hackathon. A working app that runs on Anna (an Anna **App** +
 
 **Why it's robust:** the core mechanics (movement, take, give, dialogue cueing, world seeding) are **deterministic engine-side**, so gameplay holds up even on models that won't reliably emit tool calls. The LLM shapes the story; the engine guarantees the rules.
 
+### What's trimmed on Anna (and why)
+
+To keep every turn inside the 65s invoke cap and avoid dead affordances, the Anna build hides a few things the engine still supports:
+
+| Trimmed | Why |
+|---|---|
+| 🔍 **Look / Search** | A look turn's only real payoff was the scene render, and images ship off. Disabled in the composer, the scene action bar and the character panel. |
+| 🔊 **Voice / speaker icon** | Anna has no host TTS, so the per-line speak button would never play. Hidden in Anna mode. |
+| 🖼️ **Image area** | With no portrait to fill it, the tall character card collapses to a compact plate instead of a big empty box. |
+| 🎁 **Give** | Handing an item to a character now closes the popups and drops you back on the main screen, rather than opening their whisper thread. |
+
+Resume is resilient to the harness recycling the executa: idempotent reads (state, beats, library) retry a few times before surfacing an error, so re-opening an adventure no longer bounces you to the menu when the executa cycles mid-open.
+
 ## 🏗️ Architecture (one glance)
 
 ```

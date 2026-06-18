@@ -141,7 +141,10 @@ const SCENE_STATE = mapGameState({
     status: "tense",
     exits: [{ id: "e1", label: "the street", target: "street" }],
     items: [{ id: "i1", name: "bottle", description: "gin" }],
-    available_actions: [{ id: "a1", label: "Look", type: "look" }],
+    available_actions: [
+      { id: "a1", label: "Look", type: "look" }, // filtered out: look is disabled
+      { id: "a2", label: "Pour a drink", type: "do" },
+    ],
   },
   player: { life: 18, max_life: 20, points: 30, location: "The Bar", inventory: [{ name: "key card" }] },
   characters: [
@@ -202,7 +205,8 @@ test("the integrated deck renders exits, scene actions and the current goal in O
   const deck = el.querySelector(".play-deck");
   assert.ok(deck, "one integrated header");
   assert.ok(deck.querySelector('[data-act="exit"][data-label="the street"]'), "exit button lives in the deck");
-  assert.ok(deck.querySelector('[data-act="scene-action"][data-label="Look"]'), "scene action lives in the deck");
+  assert.ok(deck.querySelector('[data-act="scene-action"][data-label="Pour a drink"]'), "scene action lives in the deck");
+  assert.equal(deck.querySelector('[data-act="scene-action"][data-label="Look"]'), null, "look/search scene actions are filtered out (look disabled)");
   assert.ok(/Find the brass key/.test(deck.querySelector(".hud-goal").textContent), "goal chip lives in the deck");
   assert.ok(deck.querySelector(".scene-name"), "scene identity lives in the deck");
   assert.equal(el.querySelector(".scene-band"), null, "no separate scene band below the header");
@@ -384,14 +388,14 @@ test("settings: the Story memory panel renders the three controls with current v
   assert.ok(panel.querySelector(".ctx-meter"), "the live context meter sits beside the budget control");
 });
 
-test("the Whisper tab hosts THE whisper composer (say/do/look)", () => {
+test("the Whisper tab hosts THE whisper composer (say/do only; look disabled)", () => {
   const el = parse(renderApp(profileOpen(PROFILE_DATA, { tab: "whisper" })));
   const whisper = el.querySelector(".profile-pane .whisper-sec");
   assert.ok(whisper, "whisper channel lives in the profile's whisper tab");
   assert.ok(/only jacker/i.test(whisper.querySelector(".pm-hint").textContent), "explains privacy");
   assert.ok(whisper.querySelector("#pmInput"), "own composer");
   assert.ok(whisper.querySelector('[data-act="pm-mode"][data-mode="do"]'), "say/do modes");
-  assert.ok(whisper.querySelector('[data-act="pm-mode"][data-mode="look"]'), "look joins the panel composer");
+  assert.equal(whisper.querySelector('[data-act="pm-mode"][data-mode="look"]'), null, "look mode removed from the panel composer");
 });
 
 test("the whisper thread renders look results: prose/images launched from this panel mirror in", () => {
@@ -547,14 +551,12 @@ test("an image beat renders as an inline picture in the story flow (no bubble)",
   assert.equal(fig.querySelector(".bubble"), null, "no bubble around an image beat");
 });
 
-test("the composer offers Look at the same level as Do and Say; the old See eye is gone", () => {
+test("the composer offers only Do and Say; Look and the old See eye are gone", () => {
   const el = parse(renderApp(playState()));
-  const look = el.querySelector('[data-act="cmp-mode"][data-mode="look"]');
-  assert.ok(look, "Look mode button next to Do/Say");
+  assert.ok(el.querySelector('[data-act="cmp-mode"][data-mode="do"]'), "Do mode button");
+  assert.ok(el.querySelector('[data-act="cmp-mode"][data-mode="say"]'), "Say mode button");
+  assert.equal(el.querySelector('[data-act="cmp-mode"][data-mode="look"]'), null, "Look mode is removed (look disabled)");
   assert.equal(el.querySelector(".see-btn"), null, "the synchronous See eye-flow is removed");
-  // look mode shows its own placeholder on the line
-  const looking = parse(renderApp(playState({ composer: { mode: "look", stack: [] } })));
-  assert.ok(/look at what\?/i.test(looking.querySelector("#cmpInput").dataset.placeholder));
 });
 
 test("Continue and the wish line sit at the composer level", () => {

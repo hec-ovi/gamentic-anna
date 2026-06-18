@@ -97,7 +97,9 @@ export function renderPlayDeck(s, locked, g = {}) {
   const desc = (scene && scene.description) || "";
   const mood = (scene && scene.status) || s.sceneStatus || null;
   const items = (scene && scene.items) || [];
-  const actions = (scene && scene.actions) || [];
+  // Look/Search are disabled: they map to a "look" turn whose only real payoff was
+  // the scene render, and images ship off (the 65s invoke cap). Drop them from the bar.
+  const actions = ((scene && scene.actions) || []).filter((a) => a.type !== "look" && a.type !== "search");
   const exits = (scene && scene.exits) || [];
   void g;
 
@@ -266,11 +268,10 @@ export function renderActionBar(g, s, locked) {
           id: "cmp",
           mode: cmp.mode,
           locked,
-          modes: ["do", "say", "look"],
+          modes: ["do", "say"],
           placeholders: {
             do: "Do or say anything... (Enter sends)",
             say: "What do you say?",
-            look: "Look at what? (empty = study the whole scene)",
           },
           submitLabel: "Send",
         })}

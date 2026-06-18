@@ -75,13 +75,34 @@ export function createApi(backendUrl, { invoke = null } = {}) {
     return { status: response.status, json: await readBody(response), ok: response.ok, statusText: response.statusText };
   }
 
+  // The Anna dev harness recycles the executa on its own; an invoke in flight when it
+  // happens is dropped (surfaces as a transport-level ApiError: status 0 from the hang,
+  // or 502 from a success:false envelope). GETs are idempotent, so retry them a few times
+  // with a short backoff before giving up - this is what keeps resume from bouncing you to
+  // the menu when the executa cycles mid-open. POSTs (actions, creation) are NOT retried:
+  // they are not idempotent and a slow turn that blows the 65s cap must surface, not double-fire.
+  function retriable(err, method) {
+    return method === "GET" && err instanceof ApiError && (err.status === 0 || err.status === 502);
+  }
+
   async function request(path, { method = "GET", body, timeout = READ_TIMEOUT_MS } = {}) {
-    const { status, json, ok, statusText } = await transport(path, method, body, timeout);
-    const good = ok !== undefined ? ok : status >= 200 && status < 300;
-    if (!good) {
-      throw new ApiError(errorDetail(json, { status, statusText: statusText || "" }), { status, body: json });
+    // Retry only over the Anna invoke transport (where the executa recycles under us); the
+    // plain HTTP path has no executa to drop a call, so a hang there surfaces immediately.
+    const attempts = invoke && method === "GET" ? 4 : 1;
+    let lastErr;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const { status, json, ok, statusText } = await transport(path, method, body, timeout);
+        const good = ok !== undefined ? ok : status >= 200 && status < 300;
+        if (!good) throw new ApiError(errorDetail(json, { status, statusText: statusText || "" }), { status, body: json });
+        return json;
+      } catch (err) {
+        lastErr = err;
+        if (i + 1 >= attempts || !retriable(err, method)) throw err;
+        await new Promise((r) => setTimeout(r, 400 * (i + 1))); // 0.4s, 0.8s, 1.2s - cover one recycle
+      }
     }
-    return json;
+    throw lastErr;
   }
 
   return {
