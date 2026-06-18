@@ -3,8 +3,10 @@ body} against the UNMODIFIED FastAPI app and return its responses, with describe
 following the Anna Executa protocol. No LLM is exercised here (health/list/404 only)."""
 import os
 
-os.environ.setdefault("ANNA", "true")
-os.environ.setdefault("ANNA_BASE_URL", "http://localhost:9100")
+# These tests exercise only the stdio bridge (describe / invoke / health / 404); no LLM
+# or provider resolution runs, so ANNA mode is intentionally NOT set here. Setting it at
+# import time would flip Anna mode on globally for the whole session and break the
+# provider/voice tests that resolve against the real (non-Anna) dialects.
 os.environ.setdefault("DB_PATH", "/tmp/gamentic-test-executa.db")
 
 import app.executa as ex  # noqa: E402

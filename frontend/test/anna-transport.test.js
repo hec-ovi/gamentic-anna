@@ -2,7 +2,11 @@
 // injected Anna Executa transport (anna.tools.invoke) instead of fetch, and map the
 // Executa's { status, json } reply onto the same value/ApiError contract as HTTP.
 import { describe, it, expect, vi } from "vitest";
-import { createApi } from "../src/api.js";
+import { createApi, annaErrorMessage } from "../src/api.js";
+
+const CF_502 =
+  '[-32000] HTTP 502: <!DOCTYPE html><html><head><title>anna.partners | 502: Bad gateway</title></head>' +
+  '<body><h1>Bad gateway<span class="code-label">Error code 502</span></h1>Visit cloudflare.com</body></html>';
 
 describe("anna executa transport", () => {
   it("routes a GET through invoke and returns the json", async () => {
@@ -41,5 +45,50 @@ describe("anna executa transport", () => {
     await api.listGames();
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  // The executa returns its full {success, data:{status,json}} / {success:false,error}
+  // envelope; the host may or may not strip it. The transport must handle every shape.
+  it("unwraps the executa success envelope the host did not strip", async () => {
+    const api = createApi("x", { invoke: async () => ({ success: true, data: { status: 200, json: { games: [] } }, tool: "request" }) });
+    expect(await api.listGames()).toEqual({ games: [] });
+  });
+
+  it("still surfaces an engine 4xx that rides inside the success envelope", async () => {
+    const api = createApi("x", { invoke: async () => ({ success: true, data: { status: 404, json: { detail: "game not found" } } }) });
+    await expect(api.getState("nope")).rejects.toMatchObject({ name: "ApiError", status: 404 });
+  });
+
+  it("turns a tool-level failure (Anna 502 after retries) into a clean ApiError, not a fake 200", async () => {
+    const api = createApi("x", { invoke: async () => ({ success: false, error: CF_502 }) });
+    const err = await api.takeAction("g1", "open the door").then(() => null, (e) => e);
+    expect(err).toMatchObject({ name: "ApiError", status: 502 });
+    // the player sees a short human line, never the raw Cloudflare page
+    expect(err.message).toMatch(/temporarily unavailable/i);
+    expect(err.message).not.toMatch(/doctype|<html|cloudflare/i);
+  });
+
+  it("surfaces a failure wrapped in the SDK { result } envelope too", async () => {
+    const api = createApi("x", { invoke: async () => ({ ok: false, result: { success: false, error: "[-32002] quota exceeded" } }) });
+    const err = await api.takeAction("g1", "x").then(() => null, (e) => e);
+    expect(err).toMatchObject({ name: "ApiError", status: 502 });
+    expect(err.message).toMatch(/usage limit/i);
+  });
+});
+
+describe("annaErrorMessage", () => {
+  it("maps gateway/provider outages to the temporary-unavailable line", () => {
+    for (const e of [CF_502, "[-32000] HTTP 502", "[-32046] agent/complete failed: HTTP 502", "[-32003] provider error", "upstream 503"])
+      expect(annaErrorMessage(e)).toMatch(/temporarily unavailable/i);
+  });
+  it("maps per-invoke caps, quota, grant and timeout to their own lines", () => {
+    expect(annaErrorMessage("[-32006] max calls exceeded")).toMatch(/too much of anna/i);
+    expect(annaErrorMessage("[-32002] quota exceeded")).toMatch(/usage limit/i);
+    expect(annaErrorMessage("[-32001] sampling not granted")).toMatch(/granted/i);
+    expect(annaErrorMessage("[-32005] timed out after 300s")).toMatch(/too long/i);
+  });
+  it("falls back to a generic, action-safe line for anything else", () => {
+    expect(annaErrorMessage("kaboom")).toMatch(/couldn't complete/i);
+    expect(annaErrorMessage(null)).toMatch(/couldn't complete/i);
   });
 });

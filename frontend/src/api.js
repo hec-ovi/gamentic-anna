@@ -37,9 +37,19 @@ export function createApi(backendUrl, { invoke = null } = {}) {
         setTimeout(() => reject(new ApiError("Anna is taking too long to answer. Try again.", { status: 0 })), timeout),
       );
       const out = await Promise.race([invoke(path, { method, body }), hang]);
-      // tools.invoke returns the plugin payload (host strips its envelopes); the
-      // SDK may wrap it as { ok, result }. Accept both, expect { status, json }.
-      const r = out && typeof out === "object" && "result" in out ? out.result : out;
+      // Peel whatever envelopes the host/SDK did or did not strip:
+      //   SDK wrapper:        { ok, result: <below> }
+      //   executa tool reply: { success, data: { status, json }, error }
+      //   host-stripped:      { status, json }   (or a bare payload)
+      let r = out && typeof out === "object" && "result" in out ? out.result : out;
+      if (r && typeof r === "object") {
+        // An explicit tool-level failure (Anna sampling 502 after retries, a per-invoke
+        // cap, a quota/grant error) must RAISE so the caller shows a clean toast - never
+        // slip through as a fake 200 carrying a raw Cloudflare error page as the "json".
+        if (r.success === false) throw new ApiError(annaErrorMessage(r.error), { status: 502, body: r });
+        // success envelope the host did NOT strip: { success:true, data:{ status, json } }
+        if (r.success === true && r.data && typeof r.data === "object") r = r.data;
+      }
       if (r && typeof r === "object" && "status" in r) return { status: r.status, json: r.json };
       return { status: 200, json: r }; // tolerant: a bare payload reads as 200
     }
@@ -116,6 +126,25 @@ async function readBody(response) {
   } catch {
     return text;
   }
+}
+
+// An executa tool-level failure carries a raw error string: a whole Cloudflare 502
+// HTML page, or a "[-32xxx] ..." JSON-RPC error. Map it to ONE short, human line for
+// the toast - never echo the payload (megabytes of markup, or an opaque code the
+// player cannot act on). Buckets follow Anna's sampling / image / agent error tables.
+export function annaErrorMessage(error) {
+  const raw = (typeof error === "string" ? error : (error && (error.message || JSON.stringify(error))) || "").toLowerCase();
+  if (/\b50[234]\b|bad gateway|gateway|upstream|provider error|-32000|-32003|-32046|-32103/.test(raw))
+    return "Anna's model is temporarily unavailable. Please try again in a moment.";
+  if (/-32006|-32007|max.?(calls|tokens)|cumulative|too many calls/.test(raw))
+    return "That turn asked too much of Anna at once. Try a simpler action.";
+  if (/-32002|-32102|quota|usage limit|insufficient (credit|balance|quota)/.test(raw))
+    return "Anna usage limit reached for now.";
+  if (/-32001|-32101|-32009|-32108|not granted|denied|permission/.test(raw))
+    return "Anna hasn't granted this capability. Check the app's permissions.";
+  if (/-32005|-32105|timeout|timed out/.test(raw))
+    return "Anna took too long to answer. Please try again.";
+  return "Anna couldn't complete that action. Please try again.";
 }
 
 // FastAPI's 422 detail is an ARRAY of {loc,msg,type}; a plain String() of it

@@ -623,6 +623,32 @@ test("optimistic echo in the whisper thread; a failed turn takes the echo back",
   await waitFor(() => expect(document.querySelector("#pmInput").textContent).toBe("psst"));
 }, 10000);
 
+test("a turn that fails on Anna's side shows a CLEAN toast, never the raw 502 page", async () => {
+  const u = user();
+  await gotoPlay(u);
+  // swap the live api onto the Anna Executa transport and fail the action the way a
+  // 502-after-retries does: the executa returns { success:false, error:<CF 502 html> }.
+  // The transport must turn that into a human toast, not a fake 200 with markup inside.
+  const { setApiTransport } = await import("../src/app/ctx.js");
+  setApiTransport(async (path) =>
+    path.endsWith("/action")
+      ? { success: false, error: '[-32000] HTTP 502: <!DOCTYPE html><title>anna.partners | 502: Bad gateway</title><body>Cloudflare</body>' }
+      : { status: 200, json: {} },
+  );
+  await u.type(cmpBox(), "open the door");
+  await u.click(screen.getByRole("button", { name: /send/i }));
+
+  const toast = await waitFor(() => {
+    const t = document.querySelector(".toast");
+    expect(t).toBeTruthy();
+    return t;
+  });
+  expect(toast.textContent).toMatch(/temporarily unavailable/i);
+  expect(toast.textContent).not.toMatch(/doctype|<html|cloudflare|502/i); // never the raw page
+  // and the typed line returns to the composer so the player loses nothing
+  await waitFor(() => expect(document.querySelector("#cmpInput").textContent).toBe("open the door"));
+}, 10000);
+
 test("the speak button walks loading -> playing -> back to idle", async () => {
   const u = user();
   const app = await mountApp();
