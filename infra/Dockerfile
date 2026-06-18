@@ -11,7 +11,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HOME=/root \
     ANNA=true \
-    IMAGE_ENABLED=true \
+    IMAGE_ENABLED=false \
+    IMAGE_ITEMS=false \
     SUMMARY_ENABLED=false \
     CHAR_SUMMARY_ENABLED=false \
     DB_PATH=/data/game/gamentic.db
@@ -46,5 +47,11 @@ EXPOSE 5180
 # No --no-llm: sampling/image reach REAL Anna (the login PAT persists on the mounted
 # /root/.config/anna volume). --no-watch: the harness watcher otherwise hot-reloads
 # the iframe and resets the game.
+# --slug/--llm-app-slug gamentic-anna: pin the harness to the REGISTERED app the account
+# actually granted. Without it the harness mints reverse-RPC tokens under the default slug
+# "app", which has no image_grant -> image/generate 403s APP_NOT_GRANTED even though the
+# installed "gamentic-anna" app (apps list / apps grants) has image_grant enabled. (Match
+# this to the slug shown by `anna-app apps list`.)
 CMD ["anna-app", "dev", "--manifest", "manifest.json", "--bundle", "./frontend", \
-     "--executa", "dir=./backend", "--port", "5180", "--no-watch"]
+     "--executa", "dir=./backend", "--slug", "gamentic-anna", "--llm-app-slug", "gamentic-anna", \
+     "--port", "5180", "--no-watch"]

@@ -1084,7 +1084,7 @@ figure.prose-art.art-loading { cursor: default; }
   background: linear-gradient(0deg, color-mix(in srgb, var(--surface-page) 92%, transparent), transparent); pointer-events: none;
 }
 .prose-art .card-corner { z-index: 2; }
-.prose-art.art-loading { aspect-ratio: 1 / 1; float: left; }
+.prose-art.art-loading { aspect-ratio: 3 / 2; float: left; }
 .narration::after { content: ""; display: block; clear: both; }
 
 /* ---- the private whisper thread (lives in the character profile) ---- */

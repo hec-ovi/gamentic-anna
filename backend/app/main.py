@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -38,24 +39,30 @@ app.add_middleware(
 )
 
 
-# Post-response jobs (art renders, summary folds, origin enrichment) are scheduled
-# through here. Outside an Anna Executa they run as Starlette BackgroundTasks (they fire
-# AFTER the response under uvicorn - correct, and what every test exercises).
+# Post-response jobs (art renders, summary folds, origin enrichment) are scheduled here.
+# Outside an Anna Executa they run as Starlette BackgroundTasks (after the response under
+# uvicorn - what every test exercises).
 #
-# Inside an Executa they MUST run before the invoke returns. Anna mints the image /
-# sampling reverse-RPC token at invoke time and tears it down when the invoke completes,
-# so a render deferred past the invoke (the earlier fire-and-forget pool) silently loses
-# the token and produces no image. We therefore run them synchronously here, inside the
-# live invoke (the same path /view already uses successfully). Most turns render 0-1
-# images so this is quick; creation is the heavy case (portraits + scene + items). A job
-# failure is logged, never raised - a missing image must not kill the turn.
+# Inside an Executa they run DETACHED. The Anna dev harness hard-caps a tool invoke at
+# ~65s and RESTARTS the executa when it's exceeded, but image renders take 35-90s EACH.
+# Blocking the invoke on renders therefore times out the call, restarts the executa, and
+# breaks resume/turns. So the invoke returns immediately and renders continue on this
+# detached pool; the reverse-RPC token's ~600s TTL outlives the call, and the frontend
+# polls /state to pick up art as it lands. A job failure is logged, never raised.
+_DETACHED = ThreadPoolExecutor(max_workers=3, thread_name_prefix="render")
+
+
+def _run_job(fn, *args) -> None:
+    try:
+        fn(*args)
+    except Exception:
+        logging.getLogger("gamentic.jobs").exception(
+            "render job %s failed", getattr(fn, "__name__", fn))
+
+
 def _schedule(background_tasks: BackgroundTasks, fn, *args) -> None:
     if hostbridge.active():
-        try:
-            fn(*args)
-        except Exception:
-            logging.getLogger("gamentic.jobs").exception(
-                "render job %s failed", getattr(fn, "__name__", fn))
+        _DETACHED.submit(_run_job, fn, *args)
     else:
         background_tasks.add_task(fn, *args)
 

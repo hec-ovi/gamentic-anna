@@ -13,6 +13,7 @@ owned by the host. Outside an executa (plain uvicorn, tests) no channel is insta
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -121,9 +122,13 @@ def generate_image_sync(
     size: str | None = None,
     reference_image_urls: list | None = None,
     n: int = 1,
-    timeout: float = 180.0,
+    timeout: float = 90.0,
 ) -> dict:
-    """Blocking `image/generate` from synchronous engine code."""
+    """Blocking `image/generate` from synchronous engine code. 90s (NOT higher): renders
+    run SERIALIZED inside one invoke, and the host kills a tool invoke at 600s. A stuck
+    render must fail FAST so several of them can't blow the invoke budget and trigger an
+    executa restart-loop. Normal renders are ~35s; 90s is generous headroom, and 4 (the
+    per-invoke image cap) x 90s + the turn's LLM calls still fits well under 600s."""
     ch = _channel
     if ch is None:
         raise RuntimeError("no Anna host channel installed")
@@ -137,4 +142,15 @@ def generate_image_sync(
             timeout=timeout,
         )
 
-    return _call_with_retry(_make, ch.loop, result_timeout=timeout + 15)
+    log = logging.getLogger("gamentic.image")
+    log.info("image/generate -> size=%s refs=%d prompt=%.80r", size,
+             len(reference_image_urls or []), prompt)
+    try:
+        result = _call_with_retry(_make, ch.loop, result_timeout=timeout + 15)
+    except Exception:
+        log.exception("image/generate FAILED")
+        raise
+    log.info("image/generate <- keys=%s %.400r",
+             list((result or {}).keys()) if isinstance(result, dict) else type(result).__name__,
+             result)
+    return result

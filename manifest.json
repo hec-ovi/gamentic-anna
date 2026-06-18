@@ -1,6 +1,6 @@
 {
   "schema": 2,
-  "permissions": ["tools.invoke", "llm.complete"],
+  "permissions": ["tools.invoke", "llm.complete", "image.generate", "image.edit"],
   "required_executas": [
     { "tool_id": "tool-dev-gamentic", "version": "latest" }
   ],

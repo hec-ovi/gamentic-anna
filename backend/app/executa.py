@@ -49,6 +49,13 @@ MANIFEST = {
     "tools": [
         {
             "name": "request",
+            # The host kills an invoke at the per-tool timeout (default 60s). World
+            # creation runs the world-gen + art-director LLM calls AND the opening image
+            # renders inside ONE invoke (~150s with art), so the default 60s killed it
+            # mid-creation: the frontend never got its reply, never transitioned into the
+            # adventure, and the in-flight renders lost their invoke-scoped token. Raise it
+            # to the reverse-RPC token TTL (600s) so a long turn/creation always completes.
+            "timeout": 600,
             "description": "Invoke a game-engine operation. Mirrors the orchestrator's REST "
                            "surface: pass the path, the HTTP method, and an optional JSON body.",
             "parameters": [
@@ -204,7 +211,11 @@ def _do_invoke(params: dict) -> dict:
         fut = asyncio.run_coroutine_threadsafe(
             _run_request(path, args.get("method", "GET"), args.get("body"), args.get("query")),
             _loop)
-        out = fut.result(timeout=660)
+        # BELOW the host's 600s per-tool invoke timeout on purpose: if a turn's renders
+        # run long, return a graceful {success:false} here rather than letting the host
+        # decide the executa is hung and RESTART it (which dropped every other in-flight
+        # call and surfaced "executa process exited" in the UI).
+        out = fut.result(timeout=540)
         # Tool-level success: the HTTP status rides inside data so the frontend can
         # branch (a 404/422 from the engine is a normal answer, not a transport fail).
         return {"result": {"success": True, "data": out, "tool": "request"}}

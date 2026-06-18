@@ -105,10 +105,10 @@ class Settings:
     # --- Image integration (orchestrator -> image-api, server to server) ---
     IMAGE_API_URL = os.getenv("IMAGE_API_URL", "http://localhost:9001")
     IMAGE_ENABLED = os.getenv("IMAGE_ENABLED", "true").lower() == "true"
-    # Scene size is orchestrator-owned (sent to /image/generate). Character per-view sizing
-    # (square face vs tall body) is image-api-owned; see docs/image/image-service.md.
-    # Benchmarked on the box: 768x768 renders in ~5.6s, so scenes default to real quality.
-    IMAGE_SCENE_W = int(os.getenv("IMAGE_SCENE_W", "768"))
+    # Scene size is orchestrator-owned. A scene is an establishing WIDE shot (the image
+    # prompt literally says "Wide shot of ..."), so it must be LANDSCAPE, not square - a
+    # square scene reads wrong in the story flow. 3:2 (snaps to Anna's 1536x1024 landscape).
+    IMAGE_SCENE_W = int(os.getenv("IMAGE_SCENE_W", "1152"))
     IMAGE_SCENE_H = int(os.getenv("IMAGE_SCENE_H", "768"))
     # The 'See' snapshot (scene WITH present characters) is a wide landscape shot so full
     # figures fit side by side. 1152x768 benchmarks like the tall body size (~7.6s).

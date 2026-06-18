@@ -10,6 +10,7 @@ on any failure these return empty/None and the game stays fully playable text-on
 Gated by IMAGE_ENABLED / voice_enabled() (VOICE_ENABLED, and quiet in Anna mode).
 """
 import base64
+import logging
 import threading
 from urllib.parse import parse_qs, urlsplit
 
@@ -160,7 +161,8 @@ def generate_character_images(descriptor: str, style: str = "", seed: int | None
     try:
         with _RENDER_GATE:
             return _provider().character_set(descriptor, style, seed=seed)
-    except Exception:
+    except Exception as exc:
+        logging.getLogger("gamentic.image").warning("character_set swallowed: %r", exc)
         return None
 
 
@@ -197,5 +199,6 @@ def generate_scene_image(prompt: str, seed: int | None = None,
             return _provider().generate(
                 prompt, (width or settings.IMAGE_SCENE_W, height or settings.IMAGE_SCENE_H),
                 seed=seed, references=references)
-    except Exception:
+    except Exception as exc:
+        logging.getLogger("gamentic.image").warning("scene image gen swallowed: %r", exc)
         return None
