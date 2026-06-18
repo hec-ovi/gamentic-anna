@@ -86,6 +86,22 @@ class PlayerItemIn(BaseModel):
     description: str = ""
 
 
+class SceneItemIn(BaseModel):
+    """An item the opening scene already holds, in plain sight (seeded revealed at
+    finalize). fixed=True marks scenery the player can see but never pocket (an altar, a
+    lever); loose loot leaves it False so the deterministic take router can pick it up."""
+    name: str
+    description: str = ""
+    fixed: bool = False
+
+
+class ExitIn(BaseModel):
+    """A way out the opening scene already shows, seeded revealed at finalize so the
+    deterministic move router can step through it from turn one."""
+    label: str
+    target: str
+
+
 class WorldSheet(BaseModel):
     """The story-creator's output and the create-game payload."""
     title: str
@@ -109,6 +125,11 @@ class WorldSheet(BaseModel):
     def _sane_life(cls, v: int) -> int:
         return max(10, min(int(v or 20), 100))
     player_items: list[PlayerItemIn] = Field(default_factory=list)  # opening possessions (seeded at finalize)
+    # The opening scene's furniture, seeded revealed at finalize so the inventory + movement
+    # loops work from turn one without waiting on the narrator (Anna has no native function-
+    # calling). Default empty = full backward compatibility.
+    scene_items: list[SceneItemIn] = Field(default_factory=list)    # opening scene items (seeded at finalize)
+    exits: list[ExitIn] = Field(default_factory=list)               # opening scene exits (seeded at finalize)
     # morning | afternoon | evening | night; '' keeps the clock default. The mapping to
     # story minutes lives with the clock (repo.clock.START_HOURS); unknown words are
     # tolerated and simply ignored there (the model never owns the clock).

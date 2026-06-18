@@ -190,6 +190,45 @@ def _match_exit(texts, exits) -> dict | None:
     return None
 
 
+# take-intent verbs: a public 'do' that opens with (or contains) one of these AND names
+# a present scene item is a deterministic pickup. 'look' is NOT here on purpose, so "take
+# a look around" expresses no take-intent and pockets nothing.
+_TAKE_VERBS = ("take", "grab", "pick up", "pick", "pocket", "snatch", "collect", "loot",
+               "scoop", "lift", "swipe")
+
+
+def _match_take(texts, scene_items) -> str | None:
+    """The deterministic TAKE router's matcher (mirror of _match_exit): does a public 'do'
+    text express take-intent AND name a present, REVEALED scene item? Returns that item's
+    stored NAME (so take_item gets the canonical name), else None. The verb is matched
+    whole-word, then the item name case- and article-insensitively, whole-word (lookarounds,
+    like _match_exit, so a name may start/end with a non-word character). First full-name
+    match wins. If no full name matches, the request's FINAL token decides, exactly like
+    repo.near_match for the pack ('take the altar' -> 'stone altar'): one revealed item
+    sharing that token wins, zero or several stay unmatched. A fixed item still matches:
+    take_item then answers in-world that it stays put. Take-intent that names no present
+    scene item matches NOTHING (so 'take a look around' does nothing)."""
+    for raw in texts:
+        text = _norm_move(raw)
+        if not text:
+            continue
+        if not any(re.search(rf"(?<!\w){re.escape(v)}(?!\w)", text) for v in _TAKE_VERBS):
+            continue
+        for it in scene_items:
+            name = _norm_move(it.get("name"))
+            for p in (name, _strip_article(name)):
+                if p and re.search(rf"(?<!\w){re.escape(p)}(?!\w)", text):
+                    return it["name"]
+        # near-miss net: a single revealed item whose final token is named whole-word in
+        # the take text wins ('take the altar' -> 'stone altar'); ambiguity stays unmatched
+        near = [it for it in scene_items
+                if (tok := repo.item_key(it.get("name") or "").split()[-1:])
+                and re.search(rf"(?<!\w){re.escape(tok[0])}(?!\w)", text)]
+        if len(near) == 1:
+            return near[0]["name"]
+    return None
+
+
 def _character_reply(conn, gid, ch, emit, private_with=None, impulse=None):
     """Run one character turn (POV + tools). Returns the reaction targets to enqueue.
     Each character agent has its OWN context; its prompt size feeds ONLY its own meter
@@ -385,6 +424,9 @@ def run_turn(conn, gid: str, action_text: str = "", segments=None,
         # movement language that names no revealed exit changes nothing.
         state_notes: list[str] = []
         moved_key = None
+        took_key = None
+        took_item_key = None   # item_key of a deterministically-taken item (suppresses a
+                               # narrator restatement of the same pickup via add_item too)
         if not continue_story:
             move_texts = ([(s.get("text") or "") for s in public
                            if (s.get("type") or "do").lower() == "do"]
@@ -400,6 +442,31 @@ def run_turn(conn, gid: str, action_text: str = "", segments=None,
                     # pre-seed the dedup key: the narrator restating the same move in its
                     # reply must not land a second receipt
                     moved_key = ("move_location", json.dumps(margs, sort_keys=True, default=str))
+
+            # Deterministic TAKE router (mirror of the move router, same reasons): the
+            # player's explicit pickup of a revealed scene item is applied BEFORE the
+            # narrator call, so the inventory loop never depends on the model emitting
+            # take_item (Anna has no native function-calling, so the narrator usually just
+            # NARRATES the pickup). One take per turn, like one move; only the player's own
+            # stated take fires it, never an auto-take; the read is at the player's CURRENT
+            # scene (after any move above). Take-intent that names no present scene item
+            # changes nothing. A fixed item still matches and take_item answers in-world.
+            nm = _match_take(move_texts, repo.visible_items(repo.current_scene(conn, gid)["items"]))
+            if nm:
+                targs = {"name": nm}
+                out = tools.apply_tool(conn, gid, "take_item", targs, actor=None)
+                if out["kind"] == "state":
+                    if out["text"]:
+                        state_notes.append(out["text"])   # 'You take X.' / the 'part of the place' line
+                    # pre-seed the dedup key, like moved_key: a narrator restatement of
+                    # take_item for the same item must not land a second receipt. When the
+                    # pickup actually MOVED the item ('You take ...'), also block a narrator
+                    # restatement via add_item: the scene slot is now empty, so add_item
+                    # would no longer fold into a take and would MINT a duplicate (the
+                    # 'three lanterns' bug). A 'fixed' result took nothing, so no item key.
+                    took_key = ("take_item", json.dumps(targs, sort_keys=True, default=str))
+                    if out["text"] and out["text"].startswith("You take "):
+                        took_item_key = repo.item_key(nm)
 
         # Impossible attempts are rejected deterministically with a friendly in-world beat,
         # BEFORE anything is applied, and the narrator is told they failed (so its prose
@@ -533,7 +600,7 @@ def run_turn(conn, gid: str, action_text: str = "", segments=None,
 
         cues: list = []   # state_notes opened above (the movement router seeds it)
         invalid_calls: list[tuple[str, dict, str]] = []  # (name, args, reason): the second chance
-        seen_calls: set = {moved_key} if moved_key else set()
+        seen_calls: set = {k for k in (moved_key, took_key) if k}
         for tc in reply.tool_calls:
             if tc.name in ("apply_damage", "attack") and pending \
                     and not (tc.arguments or {}).get("amount"):
@@ -548,6 +615,13 @@ def run_turn(conn, gid: str, action_text: str = "", segments=None,
                 if key in seen_calls:
                     continue
                 seen_calls.add(key)
+            # the deterministic take router already pocketed this item; a narrator
+            # restatement of the same pickup (take_item OR add_item, which folds into a
+            # take while the scene holds it) must not mint a second copy now that the slot
+            # is empty (article-blind, by name)
+            if took_item_key and tc.name in ("take_item", "add_item") \
+                    and repo.item_key((tc.arguments or {}).get("name") or "") == took_item_key:
+                continue
             out = tools.apply_tool(conn, gid, tc.name, tc.arguments, actor=None)
             if out["kind"] == "invalid":
                 # not dropped yet: it gets ONE deterministic retry after the loop (a

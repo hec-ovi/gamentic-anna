@@ -64,7 +64,10 @@ def test_add_item_matching_visible_scene_item_moves_it(client, fake_llm, world):
     client.post(f"/games/{gid}/action", json={"action": "I approach the door."})
     fake_llm.narrator = _nar(T("add_item", name="rusted lantern"))   # live: minted a copy
     d = client.post(f"/games/{gid}/action", json={"action": "I take the rusted lantern."}).json()
-    assert "You take rusted lantern." in _systems(d)
+    # the deterministic TAKE router pockets it first (canonical stored name, with article),
+    # and the narrator's add_item restatement of the same item is suppressed - so ONE lantern
+    assert "You take a rusted lantern." in _systems(d)
+    assert not any("Obtained" in t for t in _systems(d))      # no duplicate mint
     s = _state(client, gid)
     assert s["scene"]["items"] == []                          # the slot cleared
     assert [i["name"] for i in s["player"]["inventory"]] == ["a rusted lantern"]

@@ -9,6 +9,7 @@ import json
 import re
 
 from . import engine, prompts, llm, repo, db
+from .config import settings
 from .engine import parsing
 from .models import WorldSheet
 
@@ -110,6 +111,15 @@ def _seed_sheet_extras(conn, gid: str, sheet: WorldSheet) -> None:
     evening). Validated-tool doctrine: the sheet declares, code seeds."""
     for it in sheet.player_items:
         repo.add_item(conn, gid, it.name, it.description)
+    # The opening scene's furniture, seeded REVEALED (hidden=False) so the player sees it
+    # and the deterministic take/move routers work from turn one (Anna has no native
+    # function-calling, so the narrator can't be relied on to furnish the room). current_scene
+    # is the start_location here; same repo calls the add_scene_item/add_exit tools use.
+    for si in sheet.scene_items:
+        repo.add_scene_item(conn, gid, si.name, si.description, False,
+                            settings.SCENE_INVENTORY_CAP, si.fixed)
+    for ex in sheet.exits:
+        repo.add_exit(conn, gid, ex.label, ex.target, settings.SCENE_EXIT_CAP)
     minutes = repo.start_minutes(sheet.start_time_of_day)
     if minutes:
         repo.advance_time(conn, gid, minutes)
