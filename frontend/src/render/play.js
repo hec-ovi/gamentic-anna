@@ -1,6 +1,7 @@
 // The play screen: the deck, character columns, the action bar, give modal.
 
 import { presentCharacters, unreadPmCount } from "../adapters.js";
+import { state as appState } from "../app/ctx.js";
 import { icon } from "../icons.js";
 import { cardCorners, escapeHtml, help, holoFx, initials, titleCase, unreadBadge } from "./common.js";
 import { renderInspectModal } from "./inspect.js";
@@ -154,7 +155,7 @@ export function renderPlayDeck(s, locked, g = {}) {
       </div>
 
       <div class="deck-nav">
-        ${iconBtn({ act: "open-settings", icon: "settings", label: "Menu", title: "Menu / settings" })}
+        ${appState.annaMode ? "" : iconBtn({ act: "open-settings", icon: "settings", label: "Menu", title: "Menu / settings" })}
       </div>
     </header>`;
 }

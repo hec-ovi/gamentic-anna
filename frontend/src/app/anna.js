@@ -18,13 +18,21 @@ function toolId() {
   return ids.gamentic || DEV_TOOL_ID;
 }
 
+// True when this bundle is running inside an Anna window (the host adds a wid/t
+// query param). Synchronous and cheap, so boot can switch to Anna mode on the FIRST
+// paint - before connectAnna()'s async SDK handshake resolves - instead of flashing
+// the standalone UI (the Settings icon, a dead :8000 library fetch) first.
+export function inAnnaWindow() {
+  if (typeof window === "undefined") return false;
+  const p = new URLSearchParams(window.location.search);
+  return Boolean(p.get("wid") || p.get("t"));
+}
+
 // Connect and install the Executa transport. Returns true when routed through Anna,
 // false when standalone. Never throws (a failure just leaves the HTTP transport).
 export async function connectAnna() {
   try {
-    if (typeof window === "undefined") return false;
-    const p = new URLSearchParams(window.location.search);
-    if (!p.get("wid") && !p.get("t")) return false;          // not in an Anna window
+    if (!inAnnaWindow()) return false;                       // not in an Anna window
     const mod = await import(/* @vite-ignore */ SDK_URL);
     const AnnaAppRuntime = mod.AnnaAppRuntime || (mod.default && mod.default.AnnaAppRuntime);
     if (!AnnaAppRuntime) return false;

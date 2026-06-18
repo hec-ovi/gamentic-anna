@@ -14,7 +14,7 @@ import { stopMediaWatch } from "./app/mediastream.js";
 import { resetCreator } from "./app/creatorctl.js";
 import { maybeOpenLightbox, retryFailedImage } from "./app/media.js";
 import { followStory } from "./app/reveal.js";
-import { connectAnna } from "./app/anna.js";
+import { connectAnna, inAnnaWindow } from "./app/anna.js";
 
 // Late-loading images shift the layout AFTER the join-scroll has already
 // happened; keep the reader pinned to the newest content when that's where
@@ -43,12 +43,24 @@ export function init(opts = {}) {
   // inside action buttons (item slots) keep their own click meaning.
   root.addEventListener("click", maybeOpenLightbox, true);
   resetCreator();
+  // In an Anna window, switch to Anna mode on the FIRST paint: render as the embedded
+  // app (no Settings, compact) and SKIP the standalone HTTP library fetch - there is no
+  // :8000 listener inside the sandboxed iframe, so it would only spam
+  // ERR_CONNECTION_REFUSED. connectAnna() then installs the Executa transport and loads
+  // the library through it. Standalone preview / unit tests keep the synchronous HTTP
+  // path unchanged (annaWin is false, connectAnna() is a no-op).
+  const annaWin = inAnnaWindow();
+  if (annaWin) state.annaMode = true;
   render();
-  refreshLibrary();
-  // Inside an Anna window: install the Executa transport, then reload the library
-  // through it. Standalone preview and unit tests: connectAnna() returns false and
-  // this is a no-op, so the synchronous HTTP path above is unchanged.
-  connectAnna().then((connected) => { if (connected) refreshLibrary(); });
+  if (!annaWin) refreshLibrary();
+  connectAnna().then((connected) => {
+    if (connected) refreshLibrary();              // now routed through the Executa transport
+    else if (annaWin) {                           // guessed Anna but the SDK never connected: heal back
+      state.annaMode = false;
+      render();
+      refreshLibrary();
+    }
+  });
   return {
     state,
     voice,

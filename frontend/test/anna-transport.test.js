@@ -1,8 +1,9 @@
 // The comms-layer swap: createApi(url, { invoke }) must route every call through the
 // injected Anna Executa transport (anna.tools.invoke) instead of fetch, and map the
 // Executa's { status, json } reply onto the same value/ApiError contract as HTTP.
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { createApi, annaErrorMessage } from "../src/api.js";
+import { inAnnaWindow } from "../src/app/anna.js";
 
 const CF_502 =
   '[-32000] HTTP 502: <!DOCTYPE html><html><head><title>anna.partners | 502: Bad gateway</title></head>' +
@@ -73,6 +74,26 @@ describe("anna executa transport", () => {
     const err = await api.takeAction("g1", "x").then(() => null, (e) => e);
     expect(err).toMatchObject({ name: "ApiError", status: 502 });
     expect(err.message).toMatch(/usage limit/i);
+  });
+});
+
+// The synchronous window detector that lets boot switch to Anna mode on the first
+// paint (the host adds a wid/t query param inside an Anna window).
+describe("inAnnaWindow", () => {
+  const setSearch = (s) => window.history.replaceState({}, "", s);
+  afterEach(() => setSearch("/"));
+
+  it("is true when the host adds a window id (wid) param", () => {
+    setSearch("/?wid=win-123");
+    expect(inAnnaWindow()).toBe(true);
+  });
+  it("is true with a token (t) param too", () => {
+    setSearch("/?t=abc.def");
+    expect(inAnnaWindow()).toBe(true);
+  });
+  it("is false for a plain standalone URL", () => {
+    setSearch("/");
+    expect(inAnnaWindow()).toBe(false);
   });
 });
 

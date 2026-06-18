@@ -2,9 +2,6 @@
 render call (never across it), re-checks the game still exists before persisting (a
 wipe mid-render must never resurrect a media folder), and lands results as beats or
 row updates. All run as background tasks except the synchronous See snapshot."""
-import json
-import re
-
 from .. import db, repo, media, llm, prompts
 from ..config import settings
 from . import events, image_prompts, storage
@@ -166,13 +163,13 @@ def art_direction(gid: str) -> dict | None:
         messages = prompts.build_artdirector_messages(g, chars, time_of_day=part,
                                                       start_location=start)
     try:
-        reply = llm.chat(messages, temperature=0.4, max_tokens=700)
-        raw = re.sub(r"^```(?:json)?|```$", "", (reply.content or "").strip(),
-                     flags=re.M).strip()
-        data = json.loads(raw)
+        reply = llm.chat(messages, temperature=0.4, max_tokens=0)
     except Exception:
         return None
-    if not isinstance(data, dict):
+    # Tolerant parse (json_repair): the art bible is large, so recover a fenced or
+    # slightly-malformed reply instead of dropping every render to the generic template.
+    data = llm._loads_lenient(reply.content or "")
+    if not isinstance(data, dict) or not data:
         return None
     main_raw = str(data.get("main_image") or "").strip()
     main = image_prompts._harden_image_prompt(main_raw) if main_raw else ""

@@ -3,6 +3,12 @@ import os
 
 
 class Settings:
+    # NOTE: running natively on Anna (the Executa path, ANNA=true), the engine reverse-RPCs
+    # the Anna host for text + images and voice is off, so the external-service defaults
+    # below (llama.cpp LLM_BASE_URL, IMAGE_API_URL, the voice-api) are the LEGACY standalone
+    # stack and go unused. They stay so the engine still runs standalone (plain uvicorn) for
+    # local dev and the test suite.
+
     # llama.cpp OpenAI-compatible endpoint. In compose this is the container name.
     LLM_BASE_URL = os.getenv("LLM_BASE_URL", "http://localhost:8080/v1")
     LLM_MODEL = os.getenv("LLM_MODEL", "gemma-4-12b-heretic")
@@ -23,13 +29,13 @@ class Settings:
     NARRATOR_MAX_TOKENS = int(os.getenv("NARRATOR_MAX_TOKENS", "0"))    # 0 = uncapped (prompt governs length)
     # Follow-up "resolve" narration pass: when the narrator changed state via tools but wrote
     # no prose, a short second pass voices the outcome so no turn is dead air.
-    NARRATOR_RESOLVE_MAX_TOKENS = int(os.getenv("NARRATOR_RESOLVE_MAX_TOKENS", "180"))
+    NARRATOR_RESOLVE_MAX_TOKENS = int(os.getenv("NARRATOR_RESOLVE_MAX_TOKENS", "0"))  # 0 = uncapped (prompt governs length)
     # Agentic input interpreter: freeform typed actions are parsed into structured
     # say/do/attack/give/whisper segments by one small LLM call before the turn runs,
     # so typing freely gets directed routing + adjudication like the buttons do.
     # Falls back to the raw text on any failure. One extra call (~1-2s) per typed turn.
     INTERPRET_FREE_TEXT = os.getenv("INTERPRET_FREE_TEXT", "true").lower() == "true"
-    INTERPRET_MAX_TOKENS = int(os.getenv("INTERPRET_MAX_TOKENS", "300"))
+    INTERPRET_MAX_TOKENS = int(os.getenv("INTERPRET_MAX_TOKENS", "0"))  # 0 = uncapped (prompt governs length)
     CHARACTER_MAX_TOKENS = int(os.getenv("CHARACTER_MAX_TOKENS", "0"))  # 0 = uncapped (prompt governs length)
 
     # Context budgeting. The verbatim window is GENEROUS by owner decision (slower turns
@@ -44,7 +50,7 @@ class Settings:
     SUMMARY_ENABLED = os.getenv("SUMMARY_ENABLED", "true").lower() == "true"
     SUMMARY_EVERY_TURNS = int(os.getenv("SUMMARY_EVERY_TURNS", "10"))  # fold cadence
     SUMMARY_KEEP_TURNS = int(os.getenv("SUMMARY_KEEP_TURNS", "8"))     # newest turns never folded
-    SUMMARY_MAX_TOKENS = int(os.getenv("SUMMARY_MAX_TOKENS", "640"))
+    SUMMARY_MAX_TOKENS = int(os.getenv("SUMMARY_MAX_TOKENS", "0"))  # 0 = uncapped (prompt governs length)
     SCENE_BEATS = int(os.getenv("SCENE_BEATS", "14"))       # legacy location window (scene_beats_for_character)
     # Character memory (each character agent has its OWN whole context, bounded):
     # verbatim window = the newest beats THEY witnessed (stamped per beat, follows them
@@ -58,7 +64,7 @@ class Settings:
     CHAR_SUMMARY_ENABLED = os.getenv("CHAR_SUMMARY_ENABLED", "true").lower() == "true"
     CHAR_SUMMARY_EVERY = int(os.getenv("CHAR_SUMMARY_EVERY", "12"))      # cadence, in witnessed beats
     CHAR_SUMMARY_KEEP_TURNS = int(os.getenv("CHAR_SUMMARY_KEEP_TURNS", "8"))  # newest turns never folded
-    CHAR_SUMMARY_MAX_TOKENS = int(os.getenv("CHAR_SUMMARY_MAX_TOKENS", "320"))
+    CHAR_SUMMARY_MAX_TOKENS = int(os.getenv("CHAR_SUMMARY_MAX_TOKENS", "0"))  # 0 = uncapped (prompt governs length)
     LORE_BUDGET = int(os.getenv("LORE_BUDGET", "8"))        # max lore entries injected
     # Turn economy (owner direction 2026-06-10: a turn is a beat, not a chapter; he saw
     # three stacked conversations in one turn): at most two voices per narrator reply,

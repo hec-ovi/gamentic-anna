@@ -33,7 +33,7 @@ def chat(
     tools: list[dict] | None = None,
     tool_choice: str = "auto",
     temperature: float = 0.8,
-    max_tokens: int = 400,
+    max_tokens: int = 0,   # 0 = uncapped: shape length via the prompt, never a token ceiling
     stop: list[str] | None = None,
     thinking: bool | None = None,
     response_format: dict | None = None,

@@ -27,7 +27,10 @@ let dropped = false; // a reconnect owes a catch-up
 export function watchMedia(g) {
   stopMediaWatch();
   if (!g) return;
-  if (typeof EventSource !== "undefined") {
+  // No SSE under Anna: the sandboxed iframe cannot reach the engine's /events
+  // (api.base is the dead host:8000 there), so the EventSource would only spam
+  // connection errors. pollBurst() (post-turn) + the fallback sweep cover media there.
+  if (!state.annaMode && typeof EventSource !== "undefined") {
     const es = new EventSource(`${api.base}/games/${encodeURIComponent(g.id)}/events`);
     stream = es;
     es.onmessage = (e) => {

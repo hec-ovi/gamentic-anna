@@ -158,11 +158,12 @@ def test_finalize_tool_offers_the_seeding_fields_single_sourced():
     assert "must never be empty" in sysmd                  # description demand
 
 
-def test_origin_skill_demands_five_to_eight_sentences():
-    # live: biographies came back ~3 sentences against a 5-8 spec; the demand is now firm
+def test_origin_skill_demands_a_rich_biography():
+    # live: biographies came back ~3 sentences against the spec. The demand is firm, but
+    # as a FLOOR (depth), never an upper word/sentence ceiling (no-output-cap rule).
     text = prompts.render("origin.system.md")
-    assert "FIVE to EIGHT full sentences" in text
-    assert "never fewer than five" in text
+    assert "never thinner than five sentences" in text   # a floor, demanding MORE
+    assert "three-sentence sketch is a failure" in text
 
 
 def test_direct_post_games_seeds_extras_like_finalize(client, fake_llm):

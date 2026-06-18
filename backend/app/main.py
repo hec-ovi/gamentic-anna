@@ -427,7 +427,7 @@ def explain(gid: str, body: ExplainIn):
         messages = prompts.build_explain_messages(conn, gid, body.kind, body.key, body.beat_id)
     if not messages:
         raise HTTPException(404, "nothing like that in sight")
-    reply = llm.chat(messages, temperature=0.6, max_tokens=160)
+    reply = llm.chat(messages, temperature=0.6, max_tokens=0)
     # Same hygiene as every other model-text surface (e2e 2026-06-11: this returned
     # reply.content raw, so think spans, scaffold and markup shipped straight to the tap).
     text = engine.parsing.scrub_model_text(reply.content or "")

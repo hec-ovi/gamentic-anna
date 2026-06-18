@@ -192,6 +192,35 @@ def test_a_dead_art_director_costs_nothing(client, fake_llm, monkeypatch, tmp_pa
     assert scene_prompts and scene_prompts[-1].startswith("studio")  # name-led template
 
 
+def test_art_director_runs_uncapped_and_recovers_imperfect_json(client, fake_llm, monkeypatch, tmp_path):
+    """No output cap (max_tokens=0, per the no-cap rule) and a tolerant parse: a fenced,
+    trailing-comma reply (which a bare json.loads would reject) is repaired instead of
+    dropping the adventure's whole first-sight art to the generic template."""
+    from app import llm
+    from app.config import settings
+    monkeypatch.setattr(settings, "IMAGE_ENABLED", True)
+    monkeypatch.setattr(settings, "IMAGE_ART_DIRECTOR", True)
+    monkeypatch.setattr(settings, "GAMES_DATA_DIR", str(tmp_path))
+    fake_llm.artdirector = llm.LLMReply(content=(
+        "```json\n"
+        '{"characters": [{"name": "Mara", "descriptor": "A red-haired woman in her thirties, full body",}],\n'
+        ' "main_image": "A sunlit painter\'s studio, warm window light",}\n'
+        "```"
+    ))
+    descriptors, scene_prompts = [], []
+    monkeypatch.setattr(media, "generate_character_images",
+                        lambda descriptor, style="", seed=None: descriptors.append(descriptor) or None)
+    monkeypatch.setattr(media, "generate_scene_image",
+                        lambda prompt, **k: scene_prompts.append(prompt) or None)
+    client.post("/games", json=WORLD)
+    # the imperfect JSON was repaired: the director's words drive the render, not the template
+    assert descriptors and descriptors[0].startswith("A red-haired woman in her thirties")
+    assert scene_prompts and scene_prompts[-1].startswith("A sunlit painter's studio")
+    # and the call itself carries no token ceiling
+    artcall = next(c for c in fake_llm.calls if c["system"].startswith("You are the art director"))
+    assert artcall["max_tokens"] == 0
+
+
 def test_item_card_renders_for_article_led_names(client, fake_llm, monkeypatch, tmp_path):
     """Live (owner playtest): 'a heavy iron key' sat imageless in the pack forever and
     its slot showed bare initials. The visible-item index keys are article-blind

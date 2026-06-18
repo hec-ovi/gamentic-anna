@@ -2,6 +2,7 @@ import { test, beforeAll as before } from "vitest";
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 import { renderApp } from "../src/render.js";
+import { state } from "../src/app/ctx.js";
 import { mapGameState, mapBeats, mapProfile } from "../src/adapters.js";
 
 let document;
@@ -212,6 +213,19 @@ test("no repeated affordances: goal once, mood once, no quick chips", () => {
   assert.equal(el.querySelectorAll(".hud-goal").length, 1, "exactly one goal chip");
   assert.equal(el.querySelectorAll(".mood-badge").length, 1, "exactly one mood badge");
   assert.equal(el.querySelector('[data-act="quick"]'), null, "no synthesized suggestion chips");
+});
+
+test("Anna mode hides the play-deck Settings/Menu gear (it is a no-op there; Library still exits)", () => {
+  // standalone: the deck carries the Settings/Menu gear
+  assert.ok(parse(renderApp(scenePlay())).querySelector('[data-act="open-settings"]'), "deck gear present standalone");
+  state.annaMode = true;
+  try {
+    const el = parse(renderApp(scenePlay()));
+    assert.equal(el.querySelector('[data-act="open-settings"]'), null, "no Settings gear in the Anna deck");
+    assert.ok(el.querySelector('[data-act="go-library"]'), "the Library back button still exits play");
+  } finally {
+    state.annaMode = false; // never leak Anna mode into the other render tests
+  }
 });
 
 test("fixed-slot grids: player inventory shows 6 slots, one filled (caps as maximums)", () => {
