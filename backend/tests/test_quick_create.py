@@ -146,3 +146,13 @@ def test_quick_create_guarantees_a_takeable_item_when_model_sends_only_fixed(fak
         sc = repo.current_scene(conn, gid)
         items = repo.db.loads(sc["items"], [])
     assert any(not it.get("fixed") for it in items)           # a loose item exists
+
+
+def test_quick_create_carries_raw_prompt_as_constant_lore():
+    # the player's exact words ride a constant lore entry so the narrator honors the theme
+    # every turn and never drifts genre ("asked cyberpunk, got medieval")
+    sheet = creator._coerce_quick_sheet("a neon cyberpunk heist in rain-soaked Tokyo", {})
+    premise = [lo for lo in sheet.lore if lo.constant and "cyberpunk" in lo.content.lower()]
+    assert premise, "raw prompt must ride a constant lore entry"
+    assert "neon cyberpunk heist" in premise[0].content
+    assert "cyberpunk" in sheet.setting.lower()               # and the setting reflects it too

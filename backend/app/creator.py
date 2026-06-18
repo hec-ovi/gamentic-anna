@@ -248,6 +248,22 @@ def _coerce_quick_sheet(prompt: str, data: dict) -> WorldSheet:
     pitems = [pi for pi in (data.get("player_items") or [])
               if isinstance(pi, dict) and _nonempty(pi.get("name"))]
 
+    # Carry the player's RAW prompt into the narrator's PERMANENT context as a constant
+    # lore entry. Constant lore rides every narrator turn, so whatever the model did (or
+    # did not) structure, the adventure stays true to the words the player typed and never
+    # drifts genre - "asked cyberpunk, got medieval" can't happen. Kept even on a fully
+    # model-shaped world, so the exact premise keeps anchoring the story as it continues.
+    lore = []
+    if theme and prompt and prompt.strip():
+        lore.append({"keys": ["premise", "theme", "story"], "constant": True,
+                     "content": (f'The player asked for this adventure in their own words: '
+                                 f'"{prompt.strip()}". Honor this premise in every scene, '
+                                 f'character, item and event; keep the genre, setting and tone '
+                                 f'true to it and never drift into a different kind of story.')})
+    for lo in (data.get("lore") or []):
+        if isinstance(lo, dict) and _nonempty(lo.get("content")):
+            lore.append(lo)
+
     return WorldSheet(
         title=title,
         setting=data.get("setting") or theme,
@@ -261,6 +277,7 @@ def _coerce_quick_sheet(prompt: str, data: dict) -> WorldSheet:
         scene_items=items,
         exits=exits,
         player_items=pitems,
+        lore=lore,
     )
 
 
