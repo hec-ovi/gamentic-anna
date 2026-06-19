@@ -2,7 +2,7 @@
   "_comment": "Anna Executa descriptor for the gamentic engine. The comms layer is app/executa.py (stdio JSON-RPC bridge over the unchanged FastAPI app). `anna-app dev` discovers this and spawns `command` (cwd = this dir); `anna-app executa publish` reads slug/name/version/distribution and mints the real tool_id.",
   "slug": "engine",
   "name": "Gamentic",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "executa_type": "tool",
   "description": "Gamentic game engine, exposed as an Anna Executa. One tool, `request`, replays an HTTP-style call against the engine.",
   "tool_id": "tool-dev-gamentic",
@@ -11,13 +11,13 @@
   "command": [".venv/bin/python", "-m", "app.executa"],
   "host_capabilities": ["llm.sample", "llm.agent.auto"],
   "distribution": {
-    "_comment": "active=uv: ONE py3-none-any wheel works on every platform. The Agent runs `uv tool install <package_name>` (fetching a managed CPython + the platform dep wheels), then launches the `executable_name` console script. package_name is the direct wheel URL on a GitHub Release, NOT git+https: uv installs a wheel URL over plain HTTPS with no `git` binary on the host (the Agent image ships none), and the wheel's deps all carry wheels up to the newest CPython uv may pick. Bump the URL in lockstep with the version on every change. `local` is the dev-harness path. Install on the Agent via More -> Agents -> Install Essentials.",
+    "_comment": "active=uv: ONE py3-none-any wheel on PyPI works on every platform. The Agent runs `uv tool install <package_name>==<version>` (it ALWAYS appends ==version), so package_name MUST be the PyPI distribution name, NOT a wheel URL (uv rejects `<url>==<ver>` - the URL has to end in .whl). The PyPI name == [project].name == executable_name == tool_id. uv fetches a managed CPython + the platform dep wheels (deps carry wheels up to the newest CPython uv may pick), then launches the `executable_name` console script. Publish the wheel to PyPI at the SAME version before publishing this executa. `local` is the dev-harness path. Install on the Agent via More -> Agents -> Install Essentials.",
     "active": "uv",
     "profiles": {
       "local": { "type": "local", "supports_protocol": true },
       "uv": {
         "type": "uv",
-        "package_name": "https://github.com/hec-ovi/gamentic-anna/releases/download/executa-v0.2.6/tool_gamentic_engine_7h8aweky-0.2.6-py3-none-any.whl",
+        "package_name": "tool-gamentic-engine-7h8aweky",
         "executable_name": "tool-gamentic-engine-7h8aweky",
         "supports_protocol": true
       }

@@ -17,7 +17,7 @@ import pytest
 
 BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONSOLE = "tool-gamentic-engine-7h8aweky"      # == [project.scripts] key == executa executable_name
-VERSION = "0.2.6"
+VERSION = "0.2.7"
 
 pytestmark = pytest.mark.skipif(shutil.which("uv") is None, reason="uv not installed")
 

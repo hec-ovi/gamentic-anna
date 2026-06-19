@@ -1,7 +1,7 @@
 {
   "name": "gamentic",
   "display_name": "Gamentic",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "description": "Gamentic game engine, exposed as an Anna Executa. One tool, `request`, replays an HTTP-style call against the engine.",
   "tools": [
     {
