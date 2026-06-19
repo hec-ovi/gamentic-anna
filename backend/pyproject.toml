@@ -19,13 +19,22 @@ build-backend = "hatchling.build"
 name = "tool-gamentic-engine-7h8aweky"
 version = "0.2.4"
 description = "Gamentic game engine, exposed as an Anna Executa (uv distribution). One tool, `request`, replays an HTTP-style call against the engine."
-requires-python = ">=3.11,<3.14"
+# No upper python cap: `uv tool install` ignores Requires-Python when picking its
+# interpreter (it defaults to the newest managed CPython, currently 3.14), so the deps
+# below must ALL ship prebuilt wheels for that newest interpreter or uv falls back to
+# compiling from source (no toolchain on the Agent = install failure). That is why the
+# pins are lower-bounds chosen for wheel coverage, not the engine's exact dev pins:
+#   - pydantic>=2.13 pins pydantic-core>=2.46, the first with cp314 wheels (2.41.x = none);
+#   - pillow>=11.3 is the first Pillow with cp314 wheels;
+#   - uvicorn is intentionally absent: the executa never runs a server (it replays each
+#     request in-process via httpx ASGITransport), so uvicorn[standard]'s compiled extras
+#     (uvloop/httptools/watchfiles) were dead weight AND a cp314-wheel risk.
+requires-python = ">=3.11"
 dependencies = [
-    "fastapi==0.118.0",
-    "uvicorn[standard]==0.34.0",
-    "httpx==0.28.1",
-    "pydantic==2.11.0",
-    "pillow>=10.0",
+    "fastapi>=0.118",
+    "httpx>=0.28",
+    "pydantic>=2.13,<3",
+    "pillow>=11.3",
     "json-repair>=0.30",
 ]
 
