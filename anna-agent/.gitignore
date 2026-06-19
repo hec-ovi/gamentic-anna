@@ -1,0 +1,4 @@
+# the downloaded Anna agent (large; grab from anna.partners/download)
+*.tar.gz
+*.tgz
+Anna/
