@@ -38,7 +38,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: executa-${{ matrix.os }}
-          path: backend/dist/gamentic-executa-*.tar.gz*
+          path: backend/dist/*.tar.gz*
 
   release:
     needs: build

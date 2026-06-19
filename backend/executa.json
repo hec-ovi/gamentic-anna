@@ -2,7 +2,7 @@
   "_comment": "Anna Executa descriptor for the gamentic engine. The comms layer is app/executa.py (stdio JSON-RPC bridge over the unchanged FastAPI app). `anna-app dev` discovers this and spawns `command` (cwd = this dir); `anna-app executa publish` reads slug/name/version/distribution and mints the real tool_id.",
   "slug": "engine",
   "name": "Gamentic",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "executa_type": "tool",
   "description": "Gamentic game engine, exposed as an Anna Executa. One tool, `request`, replays an HTTP-style call against the engine.",
   "tool_id": "tool-dev-gamentic",
@@ -11,18 +11,18 @@
   "command": [".venv/bin/python", "-m", "app.executa"],
   "host_capabilities": ["llm.sample", "llm.image"],
   "distribution": {
-    "_comment": "binary = a self-contained PyInstaller --onedir bundle per platform (no Python on the host); built by packaging/build-binary.sh, hosted on GitHub Releases, mirrored to Anna R2 on cut. local = the dev-harness path. The frozen engine stores under EXECUTA_DATA. Only linux-x86_64 is built today; add macOS/Windows keys once CI (.github/workflows/executa-release.yml) produces them.",
+    "_comment": "binary = a PyInstaller --onefile bundle per platform in the layout the Anna Agent expects (per forum.anna.partners/t/.../140): the archive is <tool_id>-<platform>.tar.gz containing bin/<tool_id> + manifest.json whose runtime.binary.entrypoint.default points to bin/<tool_id>. Built by packaging/build-binary.sh, hosted on GitHub Releases. local = the dev-harness path. The frozen engine stores under EXECUTA_DATA. Only linux-x86_64 is built today; add macOS/Windows keys once CI (.github/workflows/executa-release.yml) produces them. Install on the agent via More -> Agents -> Install Essentials.",
     "active": "binary",
     "profiles": {
       "local": { "type": "local", "supports_protocol": true },
       "binary": {
         "type": "binary",
-        "executable_name": "gamentic-executa",
+        "executable_name": "tool-gamentic-engine-7h8aweky",
         "supports_protocol": true,
         "binary_urls": {
           "linux-x86_64": {
-            "url": "https://github.com/hec-ovi/gamentic-anna/releases/download/executa-v0.2.0/gamentic-executa-linux-x86_64.tar.gz",
-            "entrypoint": "gamentic-executa",
+            "url": "https://github.com/hec-ovi/gamentic-anna/releases/download/executa-v0.2.1/tool-gamentic-engine-7h8aweky-linux-x86_64.tar.gz",
+            "entrypoint": "bin/tool-gamentic-engine-7h8aweky",
             "format": "tar.gz"
           }
         }
