@@ -75,13 +75,25 @@ Resume is resilient to the harness recycling the executa: idempotent reads (stat
 ## 🏗️ Architecture (one glance)
 
 ```
-Anna copilot
-  -> iframe UI  --(anna.tools.invoke)-->  Executa  --(in-process ASGI)-->  FastAPI engine
-                                             \__(reverse-RPC: sampling + image)__> Anna host
-                                                                                (your selected model)
+┌─────────────────────────────────────────────┐
+│  Anna copilot                               │
+│  browser UI, renders the sandboxed iframe   │
+└──────────────────────┬──────────────────────┘
+                       │  anna.tools.invoke
+                       ▼
+┌─────────────────────────────────────────────┐
+│  Executa  (stdio JSON-RPC)                  │
+│  runs the FastAPI engine in-process (ASGI)  │
+└──────────────────────┬──────────────────────┘
+                       │  reverse-RPC: sampling + image
+                       ▼
+┌─────────────────────────────────────────────┐
+│  Anna host                                  │
+│  your selected model: tokens and images     │
+└─────────────────────────────────────────────┘
 ```
 
-One container. The original Gamentic engine and UI are kept intact; only the comms layers swap to Anna's own.
+Top to bottom is the call path: the iframe UI invokes the Executa, which runs the engine in-process, which reverse-RPCs the Anna host for every token (and image). One container; the original Gamentic engine and UI are kept intact, only the comms layers swap to Anna's own.
 
 - **Backend** (`backend/app/executa.py`): the FastAPI engine wrapped as a stdio Executa. Each invoke replays an HTTP-style call against the in-process app (httpx ASGI transport), so every route, its validation and its behavior are exactly what uvicorn serves.
 - **Reverse-RPC** (`backend/app/hostbridge.py`): for text and images the engine calls the Anna host directly (`sampling/createMessage`, `image/generate`) via the vendored `executa_sdk`, with bounded retries on transient gateway errors.
