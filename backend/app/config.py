@@ -1,6 +1,8 @@
 """Runtime configuration. Everything overridable by env; sane local defaults."""
 import os
 
+from . import paths
+
 
 class Settings:
     # NOTE: running natively on Anna (the Executa path, ANNA=true), the engine reverse-RPCs
@@ -97,7 +99,10 @@ class Settings:
     CHAR_TRAIT_CAP = int(os.getenv("CHAR_TRAIT_CAP", "12"))   # unlocked traits per character
     SCENE_ACTION_CAP = int(os.getenv("SCENE_ACTION_CAP", "3"))
 
-    DB_PATH = os.getenv("DB_PATH", os.path.join(os.path.dirname(__file__), "..", "gamentic.db"))
+    # Storage root: an installed executa gets a writable dir via EXECUTA_DATA; dev and
+    # Docker pin DB_PATH directly (Docker -> /data/game). Source fallback = backend/.
+    DB_PATH = os.getenv("DB_PATH") or os.path.join(
+        paths.data_dir() or os.path.join(os.path.dirname(__file__), ".."), "gamentic.db")
     # Per-game image store (downloaded from image-api, served by us, deleted on wipe).
     GAMES_DATA_DIR = os.getenv("GAMES_DATA_DIR",
                                os.path.join(os.path.dirname(os.path.abspath(DB_PATH)), "games"))

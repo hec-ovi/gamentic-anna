@@ -4,6 +4,7 @@ The DB is the authoritative game state. The model never owns state; it only
 proposes changes through tools that this layer validates and persists.
 """
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 
@@ -165,6 +166,11 @@ CREATE INDEX IF NOT EXISTS idx_lore_game ON lore(game_id);
 
 
 def connect() -> sqlite3.Connection:
+    # Ensure the storage dir exists: when installed, the DB lives under EXECUTA_DATA;
+    # that root may not be pre-created, and sqlite3.connect won't make parents.
+    _dir = os.path.dirname(os.path.abspath(settings.DB_PATH))
+    if _dir:
+        os.makedirs(_dir, exist_ok=True)
     # A turn holds its transaction for seconds (LLM calls happen inside it), while
     # background tasks (image persists) write concurrently. WAL lets readers proceed
     # and the long busy timeout makes writers QUEUE instead of raising

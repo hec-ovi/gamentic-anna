@@ -1,13 +1,32 @@
 {
-  "_comment": "Anna Executa descriptor for the gamentic engine. The comms layer is app/executa.py (stdio JSON-RPC bridge over the unchanged FastAPI app). anna-app dev discovers this and spawns the command (cwd = this dir).",
+  "_comment": "Anna Executa descriptor for the gamentic engine. The comms layer is app/executa.py (stdio JSON-RPC bridge over the unchanged FastAPI app). `anna-app dev` discovers this and spawns `command` (cwd = this dir); `anna-app executa publish` reads slug/name/version/distribution and mints the real tool_id.",
   "slug": "gamentic",
   "name": "Gamentic",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "executa_type": "tool",
   "description": "Gamentic game engine, exposed as an Anna Executa. One tool, `request`, replays an HTTP-style call against the engine.",
   "tool_id": "tool-dev-gamentic",
   "type": "python",
   "enabled": true,
   "command": [".venv/bin/python", "-m", "app.executa"],
-  "host_capabilities": ["llm.sample", "llm.image"]
+  "host_capabilities": ["llm.sample", "llm.image"],
+  "distribution": {
+    "_comment": "binary = a self-contained PyInstaller --onedir bundle per platform (no Python on the host); built by packaging/build-binary.sh, hosted on GitHub Releases, mirrored to Anna R2 on cut. local = the dev-harness path. The frozen engine stores under EXECUTA_DATA. Only linux-x86_64 is built today; add macOS/Windows keys once CI (.github/workflows/executa-release.yml) produces them.",
+    "active": "binary",
+    "profiles": {
+      "local": { "type": "local", "supports_protocol": true },
+      "binary": {
+        "type": "binary",
+        "executable_name": "gamentic-executa",
+        "supports_protocol": true,
+        "binary_urls": {
+          "linux-x86_64": {
+            "url": "https://github.com/hec-ovi/gamentic-anna/releases/download/executa-v0.2.0/gamentic-executa-linux-x86_64.tar.gz",
+            "entrypoint": "gamentic-executa",
+            "format": "tar.gz"
+          }
+        }
+      }
+    }
+  }
 }

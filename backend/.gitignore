@@ -1,0 +1,5 @@
+# PyInstaller / packaging build artifacts
+build/
+dist/
+.build-venv/
+*.spec

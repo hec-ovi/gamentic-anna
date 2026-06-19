@@ -14,9 +14,11 @@ Keep prompts lean. Q4 degrades on long context, so history and lore are budgeted
 import os
 import re
 
-from . import repo, constants
+from . import repo, constants, paths
 
-PROMPT_DIR = os.path.join(os.path.dirname(__file__), "..", "prompts")
+# Resolved through paths so it works from source, from Docker, and from a frozen
+# PyInstaller binary (prompts are bundled as data next to the executable).
+PROMPT_DIR = paths.resource_path("prompts")
 
 
 def _load(template: str) -> str:
