@@ -2,7 +2,7 @@
   "_comment": "Anna Executa descriptor for the gamentic engine. The comms layer is app/executa.py (stdio JSON-RPC bridge over the unchanged FastAPI app). `anna-app dev` discovers this and spawns `command` (cwd = this dir); `anna-app executa publish` reads slug/name/version/distribution and mints the real tool_id.",
   "slug": "engine",
   "name": "Gamentic",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "executa_type": "tool",
   "description": "Gamentic game engine, exposed as an Anna Executa. One tool, `request`, replays an HTTP-style call against the engine.",
   "tool_id": "tool-dev-gamentic",
@@ -11,10 +11,16 @@
   "command": [".venv/bin/python", "-m", "app.executa"],
   "host_capabilities": ["llm.sample", "llm.agent.auto"],
   "distribution": {
-    "_comment": "binary = a PyInstaller --onefile bundle per platform in the layout the Anna Agent expects (per forum.anna.partners/t/.../140): the archive is <tool_id>-<platform>.tar.gz containing bin/<tool_id> + manifest.json whose runtime.binary.entrypoint.default points to bin/<tool_id>. Built by packaging/build-binary.sh, hosted on GitHub Releases. local = the dev-harness path. The frozen engine stores under EXECUTA_DATA. Only linux-x86_64 is built today; add macOS/Windows keys once CI (.github/workflows/executa-release.yml) produces them. Install on the agent via More -> Agents -> Install Essentials.",
-    "active": "binary",
+    "_comment": "active=uv: ONE pip-installable wheel (pyproject.toml) works on every platform. The Agent runs `uv tool install <package_name>` (fetching a managed CPython + cross-platform dep wheels), then launches the `executable_name` console script. package_name is a git+https spec because the repo is public and we are not on PyPI; flip it to the bare PyPI name once published. `binary` is the legacy per-{os,arch} PyInstaller profile (linux-x86_64 only); `local` is the dev-harness path. Install on the Agent via More -> Agents -> Install Essentials.",
+    "active": "uv",
     "profiles": {
       "local": { "type": "local", "supports_protocol": true },
+      "uv": {
+        "type": "uv",
+        "package_name": "git+https://github.com/hec-ovi/gamentic-anna.git#subdirectory=backend",
+        "executable_name": "tool-gamentic-engine-7h8aweky",
+        "supports_protocol": true
+      },
       "binary": {
         "type": "binary",
         "executable_name": "tool-gamentic-engine-7h8aweky",

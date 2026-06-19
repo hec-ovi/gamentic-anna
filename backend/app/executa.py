@@ -39,11 +39,14 @@ from .config import settings
 from .main import app
 
 TOOL_ID = "tool-dev-gamentic"          # dev placeholder; the real id is server-minted at publish
+VERSION = "0.2.4"                      # single source of truth; mirrors pyproject + executa.json
+                                       # (and the serverInfo below, so the agent stops reporting a
+                                       # stale 0.1.0 next to the installed 0.2.x -> no false "upgrade")
 
 MANIFEST = {
     "name": TOOL_ID,
     "display_name": "Gamentic",
-    "version": "0.1.0",
+    "version": VERSION,
     "description": "Gamentic game orchestrator, exposed as an Anna Executa. One tool, "
                    "`request`, replays an HTTP-style call against the game engine.",
     "tools": [
@@ -242,7 +245,7 @@ def handle(req: dict) -> dict:
             _image.disable(reason)
         return {"result": {
             "protocolVersion": proto if proto in ("1.1", "2.0") else "2.0",
-            "serverInfo": {"name": TOOL_ID, "version": "0.1.0"},
+            "serverInfo": {"name": TOOL_ID, "version": VERSION},
             "capabilities": {"sampling": {}, "image": {}} if proto == PROTOCOL_VERSION_V2 else {},
         }}
     if method == "describe":

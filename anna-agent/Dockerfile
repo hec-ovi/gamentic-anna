@@ -32,6 +32,16 @@ WORKDIR /agent
 COPY *.tar.gz /tmp/agent/
 RUN set -e; tar -xzf /tmp/agent/*.tar.gz -C /agent && rm -rf /tmp/agent
 
+# uv, for the executa's `uv` distribution (ONE wheel, every platform: the Agent runs
+# `uv tool install <pkg>`, fetching a managed CPython + cross-platform dep wheels). We
+# bake uv in rather than rely on the Agent's own bootstrap, which installs uv to a dir
+# that is not on PATH (the "uv was installed but not found in PATH" failure). The musl
+# static binaries carry no glibc dependency. UV_TOOL_BIN_DIR forces the installed console
+# script onto /usr/local/bin (already on PATH), so the Agent's shutil.which() resolves the
+# executa launcher after install.
+COPY --from=ghcr.io/astral-sh/uv:0.11.7 /uv /uvx /usr/local/bin/
+ENV UV_TOOL_BIN_DIR=/usr/local/bin
+
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

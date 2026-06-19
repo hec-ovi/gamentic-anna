@@ -1,0 +1,46 @@
+# Packaging for the `uv` distribution of the Gamentic executa.
+#
+# Why uv: a binary distribution needs one PyInstaller build per {os,arch} (a 6-key
+# matrix to cover macOS arm64/x86_64, linux x86_64/aarch64, windows x86_64/arm64).
+# A uv distribution ships ONE wheel that uv installs on any platform: `uv tool install
+# <pkg>` fetches a managed CPython + the cross-platform dependency wheels, then exposes
+# the console script below. SQLite needs nothing extra (stdlib `sqlite3` ships with that
+# CPython); the engine binds no port (it replays requests in-process over httpx ASGI),
+# so there is no per-OS server runtime to worry about.
+#
+# The console-script name == [project].name == the executa `executable_name`, which is
+# what the Anna Agent launches (shutil.which) after `uv tool install`. Keep all three in
+# lockstep; the runtime identity is still the server-minted tool_id.
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tool-gamentic-engine-7h8aweky"
+version = "0.2.4"
+description = "Gamentic game engine, exposed as an Anna Executa (uv distribution). One tool, `request`, replays an HTTP-style call against the engine."
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "fastapi==0.118.0",
+    "uvicorn[standard]==0.34.0",
+    "httpx==0.28.1",
+    "pydantic==2.11.0",
+    "pillow>=10.0",
+    "json-repair>=0.30",
+]
+
+[project.scripts]
+tool-gamentic-engine-7h8aweky = "app.executa:main"
+
+[tool.hatch.build.targets.wheel]
+# The two import packages plus the read-only prompt templates. `prompts/` is force-included
+# at the wheel root so it lands beside `app/`/`executa_sdk/` in site-packages, exactly where
+# app/paths.py:resource_path("prompts") resolves it (dirname(dirname(__file__))) == that root,
+# matching the source-tree layout (backend/prompts) with no code change.
+packages = ["app", "executa_sdk"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"prompts" = "prompts"
+
+[tool.hatch.build.targets.sdist]
+include = ["app", "executa_sdk", "prompts", "pyproject.toml"]
