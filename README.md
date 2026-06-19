@@ -69,7 +69,17 @@ One container. The original Gamentic engine and UI are kept intact; only the com
 - **Frontend** (`frontend/src/app/anna.js`): the UI runs in Anna's sandboxed iframe and routes through the injected transport; standalone dev falls back to `fetch`.
 - **Storage**: embedded SQLite on a Docker volume. Voice is off (Anna has no TTS).
 
-## 📦 Run it
+## 🎮 Play it on Anna (the published app)
+
+The store path, once it is live on your account. You need the **Anna local Agent** installed and online (get it from [anna.partners/download](https://anna.partners/download)): a Tool Executa runs on the Agent, the web app has no runtime of its own.
+
+1. **Install the Gamentic app** from Anna.
+2. **Executa Hub -> Learned -> Gamentic -> allow all permissions.** This grants the host-LLM sampling permission the engine reverse-RPCs for every turn. Skip it and the model is never authorized, so play falls back to placeholder text.
+3. **Agents -> Install Essentials.** Your Agent installs the Executa and brings it online.
+
+Then open the app and play. The Executa ships as a **`uv` distribution**: Install Essentials runs `uv tool install` of one cross-platform wheel, so it works on macOS, Linux and Windows with no per-platform binary (uv fetches a managed Python and the dependency wheels for the host).
+
+## 📦 Run it locally (dev harness)
 
 One container runs `anna-app dev` (Anna's own dev runtime): it serves the iframe and spawns the Executa.
 
@@ -100,7 +110,7 @@ docker-compose.yml
 
 ## 🧪 Tests
 
-**569 backend + 232 frontend tests pass.**
+**572 backend + 232 frontend tests pass.**
 
 ```sh
 # frontend (vitest + Testing Library, msw, jsdom)
@@ -118,4 +128,4 @@ cd backend && uv pip install --python .venv -r requirements.txt pytest && .venv/
 - **The 65s invoke cap is the headline constraint.** It bounds image generation (off by default) and is why post-response jobs run detached. Watch for it if you re-enable images or add slow per-turn work.
 - **Token budget:** Anna's executa-side sampling makes `max_tokens` mandatory and caps it at 8192; the engine always passes the maximum and shapes length through the prompt, never a truncating ceiling.
 - **Images (when enabled):** generated images come back as short-lived host URLs; the engine persists each per game, then the Executa inlines it to the iframe as a data URI (the sandboxed iframe cannot fetch arbitrary URLs).
-- **Publishing:** the Executa is published to Anna's Executa Hub and referenced by `tool_id`; on install, the user's Anna downloads and runs it. This repo is the dev/run setup for that app.
+- **Publishing:** the Executa is published to Anna's Executa Hub and referenced by `tool_id`; on Install Essentials the user's Agent runs `uv tool install` of the wheel from a GitHub Release (`backend/pyproject.toml` builds it; one `py3-none-any` artifact covers every platform). This repo is the dev/run setup for that app.
