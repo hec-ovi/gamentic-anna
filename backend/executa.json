@@ -2,7 +2,7 @@
   "_comment": "Anna Executa descriptor for the gamentic engine. The comms layer is app/executa.py (stdio JSON-RPC bridge over the unchanged FastAPI app). `anna-app dev` discovers this and spawns `command` (cwd = this dir); `anna-app executa publish` reads slug/name/version/distribution and mints the real tool_id.",
   "slug": "engine",
   "name": "Gamentic",
-  "version": "0.2.1",
+  "version": "0.2.3",
   "executa_type": "tool",
   "description": "Gamentic game engine, exposed as an Anna Executa. One tool, `request`, replays an HTTP-style call against the engine.",
   "tool_id": "tool-dev-gamentic",
@@ -21,7 +21,7 @@
         "supports_protocol": true,
         "binary_urls": {
           "linux-x86_64": {
-            "url": "https://github.com/hec-ovi/gamentic-anna/releases/download/executa-v0.2.1/tool-gamentic-engine-7h8aweky-linux-x86_64.tar.gz",
+            "url": "https://github.com/hec-ovi/gamentic-anna/releases/download/executa-v0.2.3/tool-gamentic-engine-7h8aweky-linux-x86_64.tar.gz",
             "entrypoint": "bin/tool-gamentic-engine-7h8aweky",
             "format": "tar.gz"
           }
