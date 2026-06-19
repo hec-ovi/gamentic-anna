@@ -2,7 +2,7 @@
   "schema": 2,
   "permissions": ["tools.invoke", "llm.complete"],
   "required_executas": [
-    { "tool_id": "tool-dev-gamentic", "version": "latest" }
+    { "tool_id": "tool-gamentic-engine-xxxb2ewm", "version": "latest" }
   ],
   "system_prompt_addendum": "When the user wants to play or build a text adventure, summon the game window via open_app_view('play').",
   "ui": {
