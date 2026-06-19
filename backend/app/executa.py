@@ -68,9 +68,12 @@ MANIFEST = {
             ],
         }
     ],
-    # Reverse host-capabilities the engine uses: the host LLM (text) and image gen.
-    # Without these declared, Nexus refuses the reverse RPCs (-32008 / -32107).
-    "host_capabilities": ["llm.sample", "llm.image"],
+    # Reverse host-capabilities the engine uses: host LLM sampling (text). llm.agent.auto
+    # lets the host mint the per-invoke sampling token via an app session - the auth chain
+    # for an app-bundled executa run by the Anna agent (app host_api.agent.session.auto ->
+    # sampling token), which is what fixes the -32001 "sampling token missing". Matches the
+    # anna-app-llm-demo example. Without llm.sample declared, sampling is -32008 NOT_NEGOTIATED.
+    "host_capabilities": ["llm.sample", "llm.agent.auto"],
     "runtime": {"type": "uv", "min_version": "0.1.0"},
 }
 

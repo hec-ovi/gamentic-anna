@@ -9,7 +9,7 @@
   "type": "python",
   "enabled": true,
   "command": [".venv/bin/python", "-m", "app.executa"],
-  "host_capabilities": ["llm.sample", "llm.image"],
+  "host_capabilities": ["llm.sample", "llm.agent.auto"],
   "distribution": {
     "_comment": "binary = a PyInstaller --onefile bundle per platform in the layout the Anna Agent expects (per forum.anna.partners/t/.../140): the archive is <tool_id>-<platform>.tar.gz containing bin/<tool_id> + manifest.json whose runtime.binary.entrypoint.default points to bin/<tool_id>. Built by packaging/build-binary.sh, hosted on GitHub Releases. local = the dev-harness path. The frozen engine stores under EXECUTA_DATA. Only linux-x86_64 is built today; add macOS/Windows keys once CI (.github/workflows/executa-release.yml) produces them. Install on the agent via More -> Agents -> Install Essentials.",
     "active": "binary",

@@ -23,7 +23,8 @@
       "tools": ["required:*"],
       "llm": ["complete"],
       "image": ["generate", "edit"],
-      "window": ["set_title", "open_view"]
+      "window": ["set_title", "open_view"],
+      "agent": { "session": { "auto": true }, "tools": [] }
     }
   }
 }
