@@ -1,0 +1,9 @@
+{
+  "$schema": "anna-executa-identity/v1",
+  "host": "https://anna.partners",
+  "executa_id": 1020,
+  "tool_id": "tool-gamentic-engine-xxxb2ewm",
+  "slug": "engine",
+  "executa_type": "tool",
+  "first_published_at": "2026-06-19T10:14:00.144Z"
+}
