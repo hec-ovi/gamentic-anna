@@ -50,7 +50,8 @@ print(json.dumps({
 PY
 
 tar -czf "dist/${OUT}" -C stage .
-( cd dist && sha256sum "${OUT}" > "${OUT}.sha256" )
+# portable checksum: Linux has sha256sum, macOS has shasum
+( cd dist && { command -v sha256sum >/dev/null 2>&1 && sha256sum "${OUT}" || shasum -a 256 "${OUT}"; } > "${OUT}.sha256" )
 
 echo ">> built dist/${OUT}"
 tar -tzf "dist/${OUT}"
