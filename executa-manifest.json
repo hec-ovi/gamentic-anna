@@ -1,0 +1,20 @@
+{
+  "name": "gamentic",
+  "display_name": "Gamentic",
+  "version": "0.2.3",
+  "description": "Gamentic game engine, exposed as an Anna Executa. One tool, `request`, replays an HTTP-style call against the engine.",
+  "tools": [
+    {
+      "name": "request",
+      "timeout": 600,
+      "description": "Invoke a game-engine operation. Mirrors the orchestrator's REST surface: pass the path, the HTTP method, and an optional JSON body.",
+      "parameters": [
+        { "name": "path", "type": "string", "required": true, "description": "Engine path, e.g. /games or /games/{id}/action." },
+        { "name": "method", "type": "string", "required": false, "default": "GET", "description": "HTTP verb: GET | POST | PATCH | DELETE." },
+        { "name": "body", "type": "object", "required": false, "description": "JSON request body for POST/PATCH." }
+      ]
+    }
+  ],
+  "credentials": [],
+  "host_capabilities": ["llm.sample", "llm.agent.auto"]
+}

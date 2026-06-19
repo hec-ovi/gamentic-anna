@@ -1,0 +1,14 @@
+{
+  "name": "tool-gamentic-engine-7h8aweky",
+  "version": "0.2.3",
+  "runtime": {
+    "binary": {
+      "entrypoint": {
+        "default": "bin/tool-gamentic-engine-7h8aweky"
+      },
+      "permissions": {
+        "bin/tool-gamentic-engine-7h8aweky": "0o755"
+      }
+    }
+  }
+}
