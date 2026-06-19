@@ -4,6 +4,15 @@
 
 Describe a world in one sentence, then **play it** turn by turn: a live narrator, characters you talk and whisper to, an inventory you loot and gift, scene changes, new characters on the fly, and quests. It runs **natively as an Anna App**, with no GPU, no third-party bridge, and no bundled model: the engine reverse-RPCs Anna's own host for every token.
 
+## 📸 Screenshots
+
+<p align="center">
+  <img src="media/screenshot-4.png" width="49%" alt="Play a scene with a living cast that talks and remembers" />
+  <img src="media/screenshot-6.png" width="49%" alt="Every character has a profile, private memory and 1:1 whispers" />
+</p>
+
+<p align="center"><em>A turn in play (scene, narration, party) and a character's profile + whisper channel.</em></p>
+
 ## 🏆 Hackathon submission
 
 Anna AI-Native App Hackathon. A working app that runs on Anna (an Anna **App** + an **Executa**), not a future integration plan.
