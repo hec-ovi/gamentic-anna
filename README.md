@@ -77,7 +77,7 @@ The store path, once it is live on your account. You need the **Anna local Agent
 2. **Executa Hub -> Learned -> Gamentic -> allow all permissions.** This grants the host-LLM sampling permission the engine reverse-RPCs for every turn. Skip it and the model is never authorized, so play falls back to placeholder text.
 3. **Agents -> Install Essentials.** Your Agent installs the Executa and brings it online.
 
-Then open the app and play. The Executa ships as a **`uv` distribution**: Install Essentials runs `uv tool install` of one cross-platform wheel, so it works on macOS, Linux and Windows with no per-platform binary (uv fetches a managed Python and the dependency wheels for the host).
+Then open the app and play. The Executa ships as a **`uv` distribution** (published to PyPI): Install Essentials runs `uv tool install tool-gamentic-engine-7h8aweky==<version>`, with no per-platform binary. The wheel is `py3-none-any` and uv fetches a managed Python plus the dependency wheels for the host, so it is built to run on macOS, Linux and Windows; so far it is verified end to end on Linux.
 
 ## 📦 Run it locally (dev harness)
 
@@ -110,7 +110,7 @@ docker-compose.yml
 
 ## 🧪 Tests
 
-**572 backend + 232 frontend tests pass.**
+**572 backend + 237 frontend tests pass.**
 
 ```sh
 # frontend (vitest + Testing Library, msw, jsdom)
@@ -118,7 +118,7 @@ cd frontend && npm install && npm test
 
 # backend (pytest, end-to-end through the real engine + the real Executa stdio/reverse-RPC,
 # with host sampling faked only at the boundary)
-cd backend && uv pip install --python .venv -r requirements.txt pytest && .venv/bin/python -m pytest
+cd backend && uv venv && uv pip install -e . pytest && .venv/bin/python -m pytest
 ```
 
 `tests/test_executa_native.py` drives a full adventure (create world, scene change, scene item, pickup, give to a character, a character arriving, a whisper) through the live Executa protocol.
