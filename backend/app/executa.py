@@ -39,7 +39,7 @@ from .config import settings
 from .main import app
 
 TOOL_ID = "tool-dev-gamentic"          # dev placeholder; the real id is server-minted at publish
-VERSION = "0.2.7"                      # single source of truth; mirrors pyproject + executa.json
+VERSION = "0.2.8"                      # single source of truth; mirrors pyproject + executa.json
                                        # (and the serverInfo below, so the agent stops reporting a
                                        # stale 0.1.0 next to the installed 0.2.x -> no false "upgrade")
 

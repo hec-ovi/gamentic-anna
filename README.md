@@ -13,6 +13,16 @@ Describe a world in one sentence, then **play it** turn by turn: a live narrator
 
 <p align="center"><em>A turn in play (scene, narration, party) and a character's profile + whisper channel.</em></p>
 
+## 🎮 Play it on Anna (start here)
+
+You need the **Anna local Agent** installed and online (get it from [anna.partners/download](https://anna.partners/download)): a Tool Executa runs on the Agent, the web app has no runtime of its own. Then, in this order:
+
+1. **Install the app.** More -> App Store -> **gamentic-anna** -> Install.
+2. **Grant the model.** More -> Advanced -> Executas -> Learned -> **Gamentic** -> Permissions -> **LLM Sampling** -> toggle on. This authorizes the host-LLM sampling the engine reverse-RPCs every turn; skip it and play falls back to placeholder text.
+3. **Install + run the engine.** More -> Agents -> (on your agent) -> **Install Essentials**, then confirm it is live: Details -> **Gamentic** must show **Running**.
+
+Then open the app and play. The Executa ships as a **`uv` distribution** (published to PyPI): Install Essentials runs `uv tool install tool-gamentic-engine-7h8aweky==<version>`, with no per-platform binary. The wheel is `py3-none-any` and uv fetches a managed Python plus the dependency wheels for the host, so it is built to run on macOS, Linux and Windows; so far it is verified end to end on Linux.
+
 ## 🏆 Hackathon submission
 
 Anna AI-Native App Hackathon. A working app that runs on Anna (an Anna **App** + an **Executa**), not a future integration plan.
@@ -68,16 +78,6 @@ One container. The original Gamentic engine and UI are kept intact; only the com
 - **Tool calls** (`backend/app/llm.py`): Anna sampling has no OpenAI-style function calling but does structured JSON, so the engine asks for a `{prose, tool_calls}` envelope and parses it back with a tolerant local repair (no network round-trip).
 - **Frontend** (`frontend/src/app/anna.js`): the UI runs in Anna's sandboxed iframe and routes through the injected transport; standalone dev falls back to `fetch`.
 - **Storage**: embedded SQLite on a Docker volume. Voice is off (Anna has no TTS).
-
-## 🎮 Play it on Anna (the published app)
-
-The store path, once it is live on your account. You need the **Anna local Agent** installed and online (get it from [anna.partners/download](https://anna.partners/download)): a Tool Executa runs on the Agent, the web app has no runtime of its own.
-
-1. **Install the Gamentic app** from Anna.
-2. **Executa Hub -> Learned -> Gamentic -> allow all permissions.** This grants the host-LLM sampling permission the engine reverse-RPCs for every turn. Skip it and the model is never authorized, so play falls back to placeholder text.
-3. **Agents -> Install Essentials.** Your Agent installs the Executa and brings it online.
-
-Then open the app and play. The Executa ships as a **`uv` distribution** (published to PyPI): Install Essentials runs `uv tool install tool-gamentic-engine-7h8aweky==<version>`, with no per-platform binary. The wheel is `py3-none-any` and uv fetches a managed Python plus the dependency wheels for the host, so it is built to run on macOS, Linux and Windows; so far it is verified end to end on Linux.
 
 ## 📦 Run it locally (dev harness)
 
