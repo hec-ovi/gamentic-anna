@@ -3,7 +3,7 @@
 // Executa's { status, json } reply onto the same value/ApiError contract as HTTP.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createApi, annaErrorMessage } from "../src/api.js";
-import { inAnnaWindow } from "../src/app/anna.js";
+import { inAnnaWindow, resolveToolId } from "../src/app/anna.js";
 
 const CF_502 =
   '[-32000] HTTP 502: <!DOCTYPE html><html><head><title>anna.partners | 502: Bad gateway</title></head>' +
@@ -116,6 +116,34 @@ describe("inAnnaWindow", () => {
   it("is false for a plain standalone URL", () => {
     setSearch("/");
     expect(inAnnaWindow()).toBe(false);
+  });
+});
+
+// The same bundle ships to the published app (minted tool-gamentic-engine id) and to
+// local dev (tool-dev-gamentic). resolveToolId must use whatever the HOST whitelisted
+// (tools.list), so a published install never calls the dev id (which isn't whitelisted).
+describe("resolveToolId", () => {
+  afterEach(() => { delete window.__ANNA_TOOL_IDS__; });
+
+  it("uses the host's whitelisted tool id (published install)", async () => {
+    const anna = { tools: { list: async () => ({ tools: [{ tool_id: "tool-gamentic-engine-xxxb2ewm" }] }) } };
+    expect(await resolveToolId(anna)).toBe("tool-gamentic-engine-xxxb2ewm");
+  });
+
+  it("picks the gamentic/engine tool when several are whitelisted", async () => {
+    const anna = { tools: { list: async () => ({ tools: [{ tool_id: "tool-other-thing-1" }, { tool_id: "tool-gamentic-engine-9" }] }) } };
+    expect(await resolveToolId(anna)).toBe("tool-gamentic-engine-9");
+  });
+
+  it("falls back to the publish-injected map when the list is empty", async () => {
+    window.__ANNA_TOOL_IDS__ = { engine: "tool-gamentic-engine-frommap" };
+    const anna = { tools: { list: async () => ({ tools: [] }) } };
+    expect(await resolveToolId(anna)).toBe("tool-gamentic-engine-frommap");
+  });
+
+  it("falls back to the local-dev id when list throws and no map", async () => {
+    const anna = { tools: { list: async () => { throw new Error("not supported"); } } };
+    expect(await resolveToolId(anna)).toBe("tool-dev-gamentic");
   });
 });
 

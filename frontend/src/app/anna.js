@@ -13,9 +13,31 @@ const SDK_URL = "/static/anna-apps/_sdk/latest/index.js";
 // (matches TOOL_ID in backend/app/executa.py and the manifest's executa handle).
 const DEV_TOOL_ID = "tool-dev-gamentic";
 
-function toolId() {
+// Static fallback: the publish-injected map (bundle/anna-tool-ids.js sets
+// window.__ANNA_TOOL_IDS__ = {"<executa-name>":"<minted-id>"}), else the local-dev id.
+function fallbackToolId() {
   const ids = (typeof window !== "undefined" && window.__ANNA_TOOL_IDS__) || {};
-  return ids.gamentic || DEV_TOOL_ID;
+  return ids.gamentic || ids.engine || DEV_TOOL_ID;
+}
+
+// Ask the host which Executa this app is actually whitelisted to call, rather than
+// guessing. The published app bundles the engine under a minted id
+// (tool-gamentic-engine-...); local dev uses tool-dev-gamentic. With host_api.tools
+// = "required:*", tools.list returns whichever id the host granted, so the SAME bundle
+// works published AND in dev. Falls back to the injected map / dev id if list is empty
+// or unsupported. Exported for tests.
+export async function resolveToolId(anna) {
+  try {
+    const res = await anna.tools.list();
+    const tools = (res && (res.tools || (res.result && res.result.tools))) || [];
+    if (tools.length) {
+      const ours = tools.find((t) => /gamentic|engine/.test((t && t.tool_id) || ""));
+      return ((ours || tools[0]) || {}).tool_id || fallbackToolId();
+    }
+  } catch {
+    // fall through to the static fallback
+  }
+  return fallbackToolId();
 }
 
 // True when this bundle is running inside an Anna window (the host adds a wid/t
@@ -37,7 +59,7 @@ export async function connectAnna() {
     const AnnaAppRuntime = mod.AnnaAppRuntime || (mod.default && mod.default.AnnaAppRuntime);
     if (!AnnaAppRuntime) return false;
     const anna = await AnnaAppRuntime.connect();             // rejects in standalone preview
-    const tid = toolId();
+    const tid = await resolveToolId(anna);                   // the id the host actually granted
     const invoke = (path, { method = "GET", body } = {}) =>
       anna.tools.invoke({ tool_id: tid, method: "request", args: { path, method, body } });
     setApiTransport(invoke);
