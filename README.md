@@ -13,15 +13,26 @@ Describe a world in one sentence, then **play it** turn by turn: a live narrator
 
 <p align="center"><em>A turn in play (scene, narration, party) and a character's profile + whisper channel.</em></p>
 
-## 🎮 Play it on Anna (start here)
+## 🎮 Play it on Anna
 
-You need the **Anna local Agent** installed and online (get it from [anna.partners/download](https://anna.partners/download)): a Tool Executa runs on the Agent, the web app has no runtime of its own. Then, in this order:
+> 🧩 **Before anything else:** install the **Anna local Agent** and keep it running ([download it here](https://anna.partners/download)). The game engine runs on your Agent. The browser has no runtime of its own.
 
-1. **Install the app.** More -> App Store -> **gamentic-anna** -> Install.
-2. **Grant the model.** More -> Advanced -> Executas -> Learned -> **Gamentic** -> Permissions -> **LLM Sampling** -> toggle on. This authorizes the host-LLM sampling the engine reverse-RPCs every turn; skip it and play falls back to placeholder text.
-3. **Install + run the engine.** More -> Agents -> (on your agent) -> **Install Essentials**, then confirm it is live: Details -> **Gamentic** must show **Running**.
+Then three steps, in order:
 
-Then open the app and play. The Executa ships as a **`uv` distribution** (published to PyPI): Install Essentials runs `uv tool install tool-gamentic-engine-7h8aweky==<version>`, with no per-platform binary. The wheel is `py3-none-any` and uv fetches a managed Python plus the dependency wheels for the host, so it is built to run on macOS, Linux and Windows; so far it is verified end to end on Linux.
+#### 📦 1. Install the app
+Open **More**, go to the **App Store**, find **gamentic-anna**, and hit **Install**.
+
+#### 🔑 2. Let it use the model
+Open **More**, then **Advanced**, then **Executas**, then **Learned**. Pick **Gamentic**, open its **Permissions**, and switch **LLM Sampling** on.
+
+#### 🚀 3. Bring the engine online
+Open **More**, then **Agents**. On your Agent, click **Install Essentials**. Open **Details** and wait until **Gamentic** reads **Running**.
+
+> 💡 **Don't skip step 2.** LLM Sampling is what lets the engine reach the model on every turn. Without it you only get placeholder text instead of real AI.
+
+🎲 That's it. Open the app and play.
+
+<sub>Under the hood: Install Essentials runs `uv tool install tool-gamentic-engine-7h8aweky` from PyPI, no per-platform binary. A single `py3-none-any` wheel covers macOS, Linux and Windows (verified end to end on Linux so far).</sub>
 
 ## 🏆 Hackathon submission
 
