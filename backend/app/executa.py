@@ -40,7 +40,7 @@ from .config import settings
 from .main import app
 
 TOOL_ID = "tool-dev-gamentic"          # dev placeholder; the real id is server-minted at publish
-VERSION = "0.3.0"                      # single source of truth; mirrors pyproject + executa.json
+VERSION = "0.3.1"                      # single source of truth; mirrors pyproject + executa.json
                                        # (and the serverInfo below, so the agent stops reporting a
                                        # stale 0.1.0 next to the installed 0.2.x -> no false "upgrade")
 
@@ -111,7 +111,12 @@ def _write_frame(msg: dict) -> None:
 # /media, so on the way out we replace those refs with small data: URIs (CSP allows
 # data:). Bounded to stay under the stdio frame cap; over budget, refs are left as-is.
 _MEDIA_PREFIX = "/media/"
-_INLINE_BUDGET = 1_400_000   # max total data:-URI chars per reply (under the frame cap)
+# Max total data:-URI chars inlined per reply. The Anna Agent's stdio reader caps a line
+# at ~64KB and a longer frame crashes it (killing the executa mid-invoke), so this stays
+# well under 64KB: one image (~10-20KB at the size below) fits, and a multi-image /state
+# inlines a couple then leaves the rest as /media paths for the frontend to pull one at a
+# time via POST /games/{id}/render (which returns a single small image). Env-tunable.
+_INLINE_BUDGET = int(os.getenv("INLINE_BUDGET", "40000"))
 
 
 def _media_path(url: str) -> str | None:
@@ -122,7 +127,10 @@ def _media_path(url: str) -> str | None:
     return os.path.join(settings.GAMES_DATA_DIR, gid, "images", name)
 
 
-def _data_uri(fp: str, max_px: int = 512, quality: int = 72) -> str | None:
+def _data_uri(fp: str, max_px: int = int(os.getenv("INLINE_IMAGE_MAX_PX", "400")),
+              quality: int = int(os.getenv("INLINE_IMAGE_QUALITY", "58"))) -> str | None:
+    # Small + lower-quality on purpose: each inlined image is ~10-20KB so a single render
+    # reply (and a couple in /state) stays under the Agent's 64KB stdio frame limit.
     try:
         from PIL import Image
         im = Image.open(fp)

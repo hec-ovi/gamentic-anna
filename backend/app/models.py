@@ -189,6 +189,15 @@ class ViewIn(BaseModel):
     focus: Optional[str] = None
 
 
+class RenderIn(BaseModel):
+    """Render ONE image synchronously (inside the invoke). The Anna agent tears the executa
+    down per-invoke, so detached render jobs never run there; the frontend pumps this route
+    once per missing image instead. kind: scene | character | item. id: cid (character) or
+    name (item); ignored for scene (always the current scene)."""
+    kind: str
+    id: Optional[str] = None
+
+
 class ExplainIn(BaseModel):
     """'Ask what this is': the player taps a thing and the model explains it in-world,
     from PLAYER-VISIBLE facts only. kind: item | character | scene | quest | goal | beat.

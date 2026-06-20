@@ -19,7 +19,7 @@ from .config import settings
 from .providers import resolve, voice_enabled
 from .providers import audio as audio_providers
 from .models import (WorldSheet, ActionIn, ContinueIn, CreateMessageIn, GameState,
-                     GameSettingsIn, SpeakIn, TurnOut, ViewIn, ExplainIn)
+                     GameSettingsIn, SpeakIn, TurnOut, ViewIn, ExplainIn, RenderIn)
 
 
 @asynccontextmanager
@@ -421,6 +421,49 @@ def view_scene(gid: str, body: ViewIn | None = None):
     if not beat:
         raise HTTPException(502, "image generation unavailable")
     return {"beat": beat, "image_url": beat["image_url"]}
+
+
+@app.post("/games/{gid}/render")
+def render_image(gid: str, body: RenderIn):
+    """Render ONE image synchronously, inside this invoke, and return it. The Anna agent
+    tears the executa down per-invoke, so the engine's DETACHED render jobs never run on
+    the agent (the dev harness keeps the executa warm, so they do there). The frontend
+    pumps this route once per missing image (scene, then each present character) so each
+    render happens inside its own short invoke - executa alive, reverse-RPC token valid.
+    Idempotent: an already-rendered target returns its existing url without re-rendering.
+    The executa inlines the returned /media ref to a small data: URI for the iframe; one
+    target's images stay under the agent's 64KB stdio frame limit (unlike a multi-image
+    /state). Gated on IMAGE_ENABLED."""
+    with db.get_conn() as conn:
+        if not repo.get_game(conn, gid):
+            raise HTTPException(404, "game not found")
+    if not settings.IMAGE_ENABLED:
+        raise HTTPException(409, "images are disabled")
+    kind = (body.kind or "").strip()
+    if kind == "scene":
+        with db.get_conn() as conn:
+            sid = repo.current_scene(conn, gid)["id"]
+        integrate.generate_scene_image(gid, sid)                 # renders only if missing
+        with db.get_conn() as conn:
+            sc = repo.current_scene(conn, gid)
+        return {"kind": "scene", "scene_id": sc["id"], "image_url": sc["image_url"]}
+    if kind == "character":
+        if not body.id:
+            raise HTTPException(422, "character id required")
+        integrate.generate_images_for_game(gid, only_cid=body.id)  # renders only if missing
+        with db.get_conn() as conn:
+            c = repo.get_character(conn, body.id)
+        if not c:
+            raise HTTPException(404, "character not found")
+        return {"kind": "character", "id": body.id, "face_url": c["face_url"],
+                "body_url": c["body_front_url"], "body_front_url": c["body_front_url"],
+                "body_side_url": c["body_side_url"]}
+    if kind == "item":
+        if not body.id:
+            raise HTTPException(422, "item name required")
+        integrate.generate_item_image(gid, body.id)
+        return {"kind": "item", "id": body.id}
+    raise HTTPException(422, f"unknown render kind: {kind!r}")
 
 
 @app.post("/games/{gid}/explain")

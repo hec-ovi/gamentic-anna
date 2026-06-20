@@ -111,6 +111,12 @@ export function createApi(backendUrl, { invoke = null } = {}) {
     listGames: () => request("/games"),
     createGame: (worldSheet) => request("/games", { method: "POST", body: worldSheet }),
     getState: (id) => request(`/games/${encodeURIComponent(id)}/state`),
+    // Render ONE image synchronously inside its own invoke. The Anna agent tears the
+    // executa down per-invoke, so the engine's detached render jobs never run there; the
+    // frontend pumps this per missing image. body: {kind:"scene"|"character"|"item", id?}.
+    // LLM timeout: a render is real host work (tens of seconds).
+    renderImage: (id, body) =>
+      request(`/games/${encodeURIComponent(id)}/render`, { method: "POST", body, timeout: LLM_TIMEOUT_MS }),
     getBeats: (id, since = null) =>
       request(`/games/${encodeURIComponent(id)}/beats${Number.isInteger(since) ? `?since=${since}` : ""}`),
     takeAction: (id, input, wish) => {

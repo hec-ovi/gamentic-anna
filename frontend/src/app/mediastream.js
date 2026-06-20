@@ -63,6 +63,7 @@ export function watchMedia(g) {
     if (state.active !== g) return stopMediaWatch();
     refreshArt(g);
     pullBeats(g);
+    pumpRenders(g); // agent path: actively request any still-missing art
   }, FALLBACK_INTERVAL);
 }
 
@@ -90,6 +91,60 @@ export function pollBurst(g) {
       pullBeats(g);
     }, ms);
   }
+}
+
+// Active art driver for the Anna AGENT path. The agent tears the executa down per-invoke,
+// so the engine's detached render jobs never run there (they do on the long-lived dev
+// harness). Instead of passively polling /state for art that will never appear, REQUEST
+// each missing image: POST /games/{id}/render renders ONE image synchronously inside its
+// own short invoke (executa alive, reverse-RPC token valid) and returns it small enough to
+// clear the agent's 64KB stdio frame limit. Serial + single-flight; slots each as it lands.
+let pumping = false;
+
+export async function pumpRenders(g) {
+  if (!g || !state.annaMode || pumping) return;
+  if (!g.state || !g.state.imagesEnabled) return;
+  pumping = true;
+  try {
+    const targets = [];
+    if (g.state.scene && !g.state.scene.imageUrl) targets.push({ kind: "scene" });
+    for (const c of g.state.characters || []) {
+      if (c.present && c.alive !== false && !c.faceUrl && !c.bodyUrl)
+        targets.push({ kind: "character", id: c.id });
+    }
+    for (const t of targets) {
+      if (state.active !== g || state.view !== "play" || g.generating) break;
+      try {
+        const res = await api.renderImage(g.id, t);   // synchronous render, returns the image
+        if (state.active !== g) break;
+        if (slotRender(g, t, res) && state.view === "play" && !g.revealing) render();
+      } catch {
+        // this image failed/timed out; the next trigger (turn / 60s sweep) retries it.
+        // Move on so one slow render never blocks the rest.
+      }
+    }
+  } finally {
+    pumping = false;
+  }
+}
+
+// Fold a /render reply (its own small {kind, image_url | face_url/body_url} shape) into
+// the live mapped game state, in place, so the next render() shows it.
+function slotRender(g, t, res) {
+  if (!g.state || !res || typeof res !== "object") return false;
+  if (t.kind === "scene" && g.state.scene && res.image_url) {
+    g.state.scene.imageUrl = res.image_url;
+    return true;
+  }
+  if (t.kind === "character") {
+    const c = (g.state.characters || []).find((x) => x.id === t.id);
+    if (c && (res.face_url || res.body_url || res.body_front_url)) {
+      c.faceUrl = res.face_url || c.faceUrl;
+      c.bodyUrl = res.body_url || res.body_front_url || c.bodyUrl;
+      return true;
+    }
+  }
+  return false;
 }
 
 // One-shot /state refetch: slot late-arriving art in (scene image, portraits).

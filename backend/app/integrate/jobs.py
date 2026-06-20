@@ -186,8 +186,11 @@ def art_direction(gid: str) -> dict | None:
     return {"main_image": main, "characters": cast}
 
 
-def generate_images_for_game(gid: str, direction: dict | None = None) -> None:
+def generate_images_for_game(gid: str, direction: dict | None = None,
+                             only_cid: str | None = None) -> None:
     """Background: generate + persist the 3-image reference set for each character.
+    `only_cid` restricts the work to one character (the synchronous per-image render
+    route uses this so the Anna agent renders one character per invoke).
     Resilient (live bug: a 'database is locked' on ONE character's commit killed the
     whole loop, leaving every portrait null): each character is independent, files
     already on disk are RELINKED instead of re-rendered, and the per-turn self-heal
@@ -201,6 +204,8 @@ def generate_images_for_game(gid: str, direction: dict | None = None) -> None:
         chars = repo.get_characters(conn, gid)
     directed = (direction or {}).get("characters") or {}
     for c in chars:
+        if only_cid and c["id"] != only_cid:
+            continue
         if repo.character_has_images(c):
             continue
         try:

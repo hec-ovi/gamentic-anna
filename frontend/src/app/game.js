@@ -7,7 +7,7 @@ import { api, root, state, voice } from "./ctx.js";
 import { showToast } from "./cues.js";
 import { withVoice } from "./speech.js";
 import { lastTurnIndexOf } from "./turns.js";
-import { stopMediaWatch, watchMedia } from "./mediastream.js";
+import { pumpRenders, stopMediaWatch, watchMedia } from "./mediastream.js";
 import { focusComposer, render } from "./ui.js";
 
 // ---------------------------------------------------------------------------
@@ -111,6 +111,7 @@ export async function openGame(gameId) {
     if (state.active) state.active.generating = false;
     render();
     watchMedia(state.active); // media-ready push + the slow fallback sweep
+    pumpRenders(state.active); // agent path: request the opening scene + portraits now
     // joining a game seats you at the keyboard, same as a finished turn does
     // (live: activeElement was <body> on entry and the first action needed a click)
     if (state.active && state.view === "play") focusComposer("#cmpInput");
