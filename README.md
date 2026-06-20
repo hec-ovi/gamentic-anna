@@ -36,12 +36,12 @@ Open **More**, then **Agents**. On your Agent, click **Install Essentials**. Ope
 
 ## 🏆 Hackathon submission
 
-Anna AI-Native App Hackathon. A working app that runs on Anna (an Anna **App** + an **Executa**), not a future integration plan.
+Anna AI-Native App Hackathon. A working app running on Anna today: an Anna **App** plus an **Executa**.
 
 | | |
 |---|---|
 | **What** | A complete AI dungeon master: describe a world, then play a text RPG with a narrator and characters that remember you. |
-| **Who it's for** | Anyone on Anna who wants a rich, replayable AI RPG (one sentence in, a world out). For builders: a clean pattern for running a real FastAPI app natively on Anna. |
+| **Who it's for** | Anyone on Anna who wants a rich, replayable AI RPG (one sentence in, a world out). For builders: a clean pattern for running a full FastAPI app natively on Anna. |
 | **How AI is used** | The narrator, every character (each its own agent with private memory), the world-creator, and the free-text interpreter are all Anna-host LLM calls. Image generation is wired the same way (Anna's `image/generate`) but disabled by default, see the cap note above. |
 | **How it connects to Anna** | The UI is an Anna iframe; the engine is an Executa it calls over `anna.tools.invoke`. The Executa reverse-RPCs the host for `sampling/createMessage` (text) and `image/generate` (images). Anna owns the model, billing and quota. |
 
@@ -51,13 +51,13 @@ Anna AI-Native App Hackathon. A working app that runs on Anna (an Anna **App** +
 |---|---|
 | 🌍 **Create** | A whole adventure from one sentence (world, cast, scene, items, exits, quests). |
 | 📖 **Play** | Narration + dialogue per turn; freeform typing is interpreted into directed actions. |
-| 🗣️ **Talk** | Per-character chat and private **whispers** (1:1, never leaked to the room). |
+| 🗣️ **Talk** | Per-character chat and private **whispers** (1:1, never shown to anyone else). |
 | 🎒 **Inventory** | Take items from a scene, give items to characters; deterministic, model-independent. |
 | 🚪 **World** | Scene transitions, new characters spawned on the fly, exits revealed as you explore. |
 | 🧠 **Memory** | Each character keeps a private rolling memory; the story keeps a recap, so context stays bounded. |
 | 🖼️ **Art** *(wired, off by default)* | Scene images, portraits and item cards via Anna's image host. Off because one render exceeds the 65s invoke cap (above); set `IMAGE_ENABLED=true` to try. |
 
-**Why it's robust:** the core mechanics (movement, take, give, dialogue cueing, world seeding) are **deterministic engine-side**, so gameplay holds up even on models that won't reliably emit tool calls. The LLM shapes the story; the engine guarantees the rules.
+**Why it's robust:** the core mechanics (movement, take, give, dialogue cueing, world seeding) are **deterministic engine-side**, so gameplay holds up even on models that won't reliably emit tool calls. The model writes the prose and dialogue; the rules (what's possible, what each action does) are enforced in code.
 
 ### What's trimmed on Anna (and why)
 
@@ -151,4 +151,4 @@ cd backend && uv venv && uv pip install -e . pytest && .venv/bin/python -m pytes
 - **The 65s invoke cap is the headline constraint.** It bounds image generation (off by default) and is why post-response jobs run detached. Watch for it if you re-enable images or add slow per-turn work.
 - **Token budget:** Anna's executa-side sampling makes `max_tokens` mandatory and caps it at 8192; the engine always passes the maximum and shapes length through the prompt, never a truncating ceiling.
 - **Images (when enabled):** generated images come back as short-lived host URLs; the engine persists each per game, then the Executa inlines it to the iframe as a data URI (the sandboxed iframe cannot fetch arbitrary URLs).
-- **Publishing:** the Executa is published to Anna's Executa Hub and referenced by `tool_id`; on Install Essentials the user's Agent runs `uv tool install <package>==<version>` from **PyPI** (`backend/pyproject.toml` builds the wheel; one `py3-none-any` artifact plus uv-resolved dependency wheels cover every platform). A wheel URL does not work here because the Agent always appends `==<version>`, which only a real package name resolves. This repo is the dev/run setup for that app.
+- **Publishing:** the Executa is published to Anna's Executa Hub and referenced by `tool_id`; on Install Essentials the user's Agent runs `uv tool install <package>==<version>` from **PyPI** (`backend/pyproject.toml` builds the wheel; one `py3-none-any` artifact plus uv-resolved dependency wheels cover every platform). A wheel URL does not work here because the Agent always appends `==<version>`, which only a package name (not a URL) resolves. This repo is the dev/run setup for that app.
