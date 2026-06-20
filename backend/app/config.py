@@ -141,6 +141,32 @@ class Settings:
     # are allowed only every N turns, so they stay a dramatic beat, not wallpaper.
     # A player look always renders if the narrator calls the tool.
     IMAGE_NARRATOR_COOLDOWN_TURNS = int(os.getenv("IMAGE_NARRATOR_COOLDOWN_TURNS", "4"))
+    # Fastest/lowest-quality lever for the Anna host image model. model_preferences only
+    # selects among the image providers the user has ENABLED in their Anna account; these
+    # bias the host toward a fast, cheap model (e.g. SDXL / FLUX-schnell) over a slow,
+    # high-quality one (DALL-E 3) so a render lands in ~20-30s, well inside the per-render
+    # timeout. hints match by substring against the user's active models; leave empty to let
+    # priorities decide. Set IMAGE_MODEL_HINTS in the account's fastest model if known.
+    IMAGE_MODEL_HINTS = os.getenv("IMAGE_MODEL_HINTS", "")          # csv, e.g. "schnell,sdxl,flux"
+    IMAGE_SPEED_PRIORITY = float(os.getenv("IMAGE_SPEED_PRIORITY", "1"))
+    IMAGE_COST_PRIORITY = float(os.getenv("IMAGE_COST_PRIORITY", "1"))
+    IMAGE_INTELLIGENCE_PRIORITY = float(os.getenv("IMAGE_INTELLIGENCE_PRIORITY", "0"))
+
+    # --- Executa invoke safety (Anna) -------------------------------------------------
+    # The Anna host kills an invoke, and the dev harness RESTARTS the executa, if it does
+    # not answer within the host's per-invoke deadline. We ALWAYS answer first: the executa
+    # caps every invoke at INVOKE_BUDGET_S (or the host's own deadline minus a margin,
+    # whichever is sooner) and replies {success:false} instead of blocking, so a slow or
+    # hung reverse-RPC can never make the host think the executa is dead and recycle it.
+    # 175s sits just under the host's 180s tools.invoke ceiling; one render (capped below)
+    # finishes far inside it. This is the single guard that keeps a render from ever
+    # taking the whole engine down (see hostbridge + executa._do_invoke).
+    INVOKE_BUDGET_S = float(os.getenv("INVOKE_BUDGET_S", "175"))
+    INVOKE_DEADLINE_MARGIN_S = float(os.getenv("INVOKE_DEADLINE_MARGIN_S", "6"))
+    # A single host image render must fail FAST so a render invoke always returns well
+    # within the budget; a stuck render can never drag the invoke toward the host deadline.
+    # Anna renders are ~20-50s on a fast/small model; 50s leaves a slow one to fail cleanly.
+    IMAGE_RENDER_TIMEOUT_S = float(os.getenv("IMAGE_RENDER_TIMEOUT_S", "50"))
 
     # --- Voice integration (orchestrator -> voice-api, server to server) ---
     VOICE_API_URL = os.getenv("VOICE_API_URL", "http://localhost:9002")

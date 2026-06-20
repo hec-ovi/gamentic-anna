@@ -2,12 +2,15 @@
 
 Anna confirmed (forum t/114) that text-model 502s are brief upstream outages over the
 SAME path image generation succeeds on, and that the host tears its throw-away session
-down in `finally`, so retrying leaks no quota and is safe. So `sample_sync` /
-`generate_image_sync` retry a bounded number of times on transient 5xx / provider /
-raw-HTTP-wrapper errors, but surface deterministic failures (not-granted, quota,
-bad-request, timeout) immediately. These tests drive the real sync facades against a
-fake host channel on a real (throwaway) asyncio loop, so the retry, the fresh-coroutine
-rebuild, and the loop hop are all exercised.
+down in `finally`, so retrying leaks no quota and is safe. So `sample_sync` retries a
+bounded number of times on transient 5xx / provider / raw-HTTP-wrapper errors, but
+surfaces deterministic failures (not-granted, quota, bad-request, timeout) immediately.
+`generate_image_sync` runs with NO retry (attempts=1): a render is slow (tens of
+seconds), so a retry would stack another full render onto the per-invoke budget and risk
+an executa recycle; a failed render surfaces at once and the frontend re-fires a fresh
+render invoke instead. These tests drive the real sync facades against a fake host
+channel on a real (throwaway) asyncio loop, so the retry, the fresh-coroutine rebuild,
+and the loop hop are all exercised.
 """
 import asyncio
 import threading
@@ -116,9 +119,22 @@ def test_persistent_502_exhausts_retries_then_raises(monkeypatch, loop):
     assert s.calls == hostbridge._RETRY_ATTEMPTS      # tried the bounded max, no more
 
 
-def test_image_path_shares_the_retry(monkeypatch, loop):
+def test_image_path_does_not_retry(monkeypatch, loop):
+    # Renders are slow, so generate_image_sync runs attempts=1: even a transient provider
+    # error (-32103) surfaces immediately rather than stacking a second render onto the
+    # invoke budget. The frontend re-fires a fresh render invoke for that image instead.
     img = _Flaky([ImageError(-32103, "provider error")], {"images": [{"url": "data:image/png;base64,AAA"}]})
+    _install(monkeypatch, loop, image=img)
+    with pytest.raises(ImageError) as ei:
+        hostbridge.generate_image_sync(prompt="a knight")
+    assert ei.value.code == -32103
+    assert img.calls == 1
+
+
+def test_image_path_succeeds_without_retry(monkeypatch, loop):
+    # A clean render returns on the first try (no retry needed).
+    img = _Flaky([None], {"images": [{"url": "data:image/png;base64,AAA"}]})
     _install(monkeypatch, loop, image=img)
     out = hostbridge.generate_image_sync(prompt="a knight")
     assert out["images"][0]["url"].startswith("data:")
-    assert img.calls == 2
+    assert img.calls == 1

@@ -50,6 +50,18 @@ export function inAnnaWindow() {
   return Boolean(p.get("wid") || p.get("t"));
 }
 
+// Build the anna.tools.invoke arg from an api-client call. The api client passes a
+// per-call `timeout` (ms); forward it as the host invoke's `timeoutMs` so a long invoke
+// (a render, a heavy turn) is NOT killed at the host's 65000ms DEFAULT - that default,
+// not a platform cap, is the "65s wall". The host clamps timeoutMs to [1000, 180000]; we
+// clamp too so the value we send is explicit. No timeout -> omit it (host default applies).
+// Exported for tests.
+export function toInvokeArgs(toolId, path, { method = "GET", body, timeout } = {}) {
+  const call = { tool_id: toolId, method: "request", args: { path, method, body } };
+  if (timeout) call.timeoutMs = Math.max(1000, Math.min(180000, timeout));
+  return call;
+}
+
 // Connect and install the Executa transport. Returns true when routed through Anna,
 // false when standalone. Never throws (a failure just leaves the HTTP transport).
 export async function connectAnna() {
@@ -60,8 +72,7 @@ export async function connectAnna() {
     if (!AnnaAppRuntime) return false;
     const anna = await AnnaAppRuntime.connect();             // rejects in standalone preview
     const tid = await resolveToolId(anna);                   // the id the host actually granted
-    const invoke = (path, { method = "GET", body } = {}) =>
-      anna.tools.invoke({ tool_id: tid, method: "request", args: { path, method, body } });
+    const invoke = (path, opts) => anna.tools.invoke(toInvokeArgs(tid, path, opts));
     setApiTransport(invoke);
     return true;
   } catch {

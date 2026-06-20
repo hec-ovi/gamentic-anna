@@ -36,7 +36,7 @@ export function createApi(backendUrl, { invoke = null } = {}) {
       const hang = new Promise((_, reject) =>
         setTimeout(() => reject(new ApiError("Anna is taking too long to answer. Try again.", { status: 0 })), timeout),
       );
-      const out = await Promise.race([invoke(path, { method, body }), hang]);
+      const out = await Promise.race([invoke(path, { method, body, timeout }), hang]);
       // Peel whatever envelopes the host/SDK did or did not strip:
       //   SDK wrapper:        { ok, result: <below> }
       //   executa tool reply: { success, data: { status, json }, error }

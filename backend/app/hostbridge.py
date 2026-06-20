@@ -15,8 +15,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from concurrent.futures import TimeoutError as _FuturesTimeout
 from dataclasses import dataclass
 from typing import Any, Callable
+
+from .config import settings
 
 # Anna's executa-side sampling makes max_tokens mandatory and hard-caps it at 8192
 # tokens/call. We pass the maximum (never a smaller truncation ceiling) and shape
@@ -49,17 +52,25 @@ def _is_transient(exc: BaseException) -> bool:
     return any(hint in text for hint in _RETRYABLE_HINTS)
 
 
-def _call_with_retry(make_coro: Callable[[], Any], loop, *, result_timeout: float):
+def _call_with_retry(make_coro: Callable[[], Any], loop, *, result_timeout: float,
+                     attempts: int = _RETRY_ATTEMPTS):
     """Run a reverse-RPC coroutine on the executa loop from a worker thread, retrying
     transient host failures with bounded backoff. `make_coro` must build a FRESH
-    coroutine each call: a coroutine is single-use, so a retry cannot reuse the last."""
+    coroutine each call: a coroutine is single-use, so a retry cannot reuse the last.
+    `attempts` is the total tries (pass 1 to disable retry, e.g. for slow image renders
+    where a retry would stack another full render onto the invoke budget). On the backstop
+    `result_timeout` we CANCEL the orphaned coroutine so a hung hop can't linger on the loop."""
     last: BaseException | None = None
-    for attempt in range(_RETRY_ATTEMPTS):
+    for attempt in range(attempts):
+        fut = asyncio.run_coroutine_threadsafe(make_coro(), loop)
         try:
-            return asyncio.run_coroutine_threadsafe(make_coro(), loop).result(timeout=result_timeout)
+            return fut.result(timeout=result_timeout)
+        except _FuturesTimeout:
+            fut.cancel()
+            raise
         except Exception as exc:  # noqa: BLE001 - re-raised below; we only branch on transience
             last = exc
-            if attempt == _RETRY_ATTEMPTS - 1 or not _is_transient(exc):
+            if attempt == attempts - 1 or not _is_transient(exc):
                 raise
             time.sleep(_RETRY_BACKOFF[attempt])
     raise last  # unreachable: the loop always returns or raises
@@ -121,17 +132,22 @@ def generate_image_sync(
     prompt: str,
     size: str | None = None,
     reference_image_urls: list | None = None,
+    model_preferences: dict | None = None,
     n: int = 1,
-    timeout: float = 90.0,
+    timeout: float | None = None,
 ) -> dict:
-    """Blocking `image/generate` from synchronous engine code. 90s (NOT higher): renders
-    run SERIALIZED inside one invoke, and the host kills a tool invoke at 600s. A stuck
-    render must fail FAST so several of them can't blow the invoke budget and trigger an
-    executa restart-loop. Normal renders are ~35s; 90s is generous headroom, and 4 (the
-    per-invoke image cap) x 90s + the turn's LLM calls still fits well under 600s."""
+    """Blocking `image/generate` from synchronous engine code. A render runs INSIDE an
+    invoke, so it MUST fail fast: a single render is bounded at IMAGE_RENDER_TIMEOUT_S
+    (default 50s) so a render invoke always returns well within the host's per-invoke
+    budget (executa._do_invoke), and a stuck render can never drag the invoke past the
+    host deadline and trigger an executa recycle. NO retry here (attempts=1): a retry
+    would stack another full render onto the budget; the frontend re-fires a fresh render
+    invoke instead. `model_preferences` selects a faster/cheaper host model when set."""
     ch = _channel
     if ch is None:
         raise RuntimeError("no Anna host channel installed")
+    if timeout is None:
+        timeout = settings.IMAGE_RENDER_TIMEOUT_S
 
     def _make():
         return ch.image.generate(
@@ -139,6 +155,7 @@ def generate_image_sync(
             n=n,
             size=size,
             reference_image_urls=reference_image_urls or None,
+            model_preferences=model_preferences or None,
             timeout=timeout,
         )
 
@@ -146,7 +163,7 @@ def generate_image_sync(
     log.info("image/generate -> size=%s refs=%d prompt=%.80r", size,
              len(reference_image_urls or []), prompt)
     try:
-        result = _call_with_retry(_make, ch.loop, result_timeout=timeout + 15)
+        result = _call_with_retry(_make, ch.loop, result_timeout=timeout + 15, attempts=1)
     except Exception:
         log.exception("image/generate FAILED")
         raise

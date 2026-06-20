@@ -28,7 +28,7 @@ services:
       # tool invoke at ~65s and restarts the executa on timeout, so synchronous renders
       # destabilize play. Text/characters/whispers/mechanics run well under the cap. Flip
       # to true once the platform raises the invoke cap (see README "The 65s invoke cap").
-      - IMAGE_ENABLED=false
+      - IMAGE_ENABLED=true
       - IMAGE_ITEMS=false
       - SUMMARY_ENABLED=false
       - CHAR_SUMMARY_ENABLED=false

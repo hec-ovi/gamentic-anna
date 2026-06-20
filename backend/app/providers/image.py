@@ -20,7 +20,22 @@ import math
 import httpx
 
 from .. import hostbridge
+from ..config import settings
 from .base import ProviderConfig, fal_queue_run
+
+
+def _anna_model_preferences() -> dict | None:
+    """Bias the Anna host toward the fastest/cheapest enabled image model (config-driven),
+    so a render lands in ~20-30s instead of ~50-90s. Only selects among models the user has
+    enabled; an empty result lets the host use the account default."""
+    prefs: dict = {}
+    hints = [h.strip() for h in (settings.IMAGE_MODEL_HINTS or "").split(",") if h.strip()]
+    if hints:
+        prefs["hints"] = [{"name": h} for h in hints]
+    prefs["speedPriority"] = settings.IMAGE_SPEED_PRIORITY
+    prefs["costPriority"] = settings.IMAGE_COST_PRIORITY
+    prefs["intelligencePriority"] = settings.IMAGE_INTELLIGENCE_PRIORITY
+    return prefs or None
 
 # View prompts for the cloud character_set path. The comfy unit owns its own
 # 3-view prompting server-side; these only exist for providers without it.
@@ -260,7 +275,8 @@ class AnnaImageProvider(ImageProvider):
         _seed, references = self._degrade(seed, references)   # seed dropped; refs kept
         result = hostbridge.generate_image_sync(
             prompt=prompt, size=self._snap_size(size),
-            reference_image_urls=references or None)
+            reference_image_urls=references or None,
+            model_preferences=_anna_model_preferences())
         images = (result or {}).get("images") or []
         first = images[0] if images and isinstance(images[0], dict) else {}
         url = first.get("url")

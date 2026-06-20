@@ -3,7 +3,7 @@
 // Executa's { status, json } reply onto the same value/ApiError contract as HTTP.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { createApi, annaErrorMessage } from "../src/api.js";
-import { inAnnaWindow, resolveToolId } from "../src/app/anna.js";
+import { inAnnaWindow, resolveToolId, toInvokeArgs } from "../src/app/anna.js";
 
 const CF_502 =
   '[-32000] HTTP 502: <!DOCTYPE html><html><head><title>anna.partners | 502: Bad gateway</title></head>' +
@@ -14,7 +14,9 @@ describe("anna executa transport", () => {
     const invoke = vi.fn(async () => ({ status: 200, json: { games: [] } }));
     const api = createApi("http://unused", { invoke });
     expect(await api.listGames()).toEqual({ games: [] });
-    expect(invoke).toHaveBeenCalledWith("/games", { method: "GET", body: undefined });
+    // The transport forwards the per-call timeout so anna.js can map it to the host's
+    // invoke timeoutMs (a read uses READ_TIMEOUT_MS = 20000).
+    expect(invoke).toHaveBeenCalledWith("/games", { method: "GET", body: undefined, timeout: 20000 });
   });
 
   it("passes method + body for a turn (same shape as the HTTP client)", async () => {
@@ -144,6 +146,36 @@ describe("resolveToolId", () => {
   it("falls back to the local-dev id when list throws and no map", async () => {
     const anna = { tools: { list: async () => { throw new Error("not supported"); } } };
     expect(await resolveToolId(anna)).toBe("tool-dev-gamentic");
+  });
+});
+
+// The "65s wall" fix: the iframe's anna.tools.invoke defaults to a 65000ms timeoutMs and
+// the host kills a longer invoke. toInvokeArgs forwards the api client's per-call timeout
+// as timeoutMs (clamped to the host's [1000, 180000] window) so a render or heavy turn
+// gets the full budget instead of being cut at 65s.
+describe("toInvokeArgs (timeoutMs forwarding)", () => {
+  it("omits timeoutMs when no timeout is given (host default applies)", () => {
+    const a = toInvokeArgs("tool-x", "/games", { method: "GET" });
+    expect(a).toEqual({ tool_id: "tool-x", method: "request", args: { path: "/games", method: "GET", body: undefined } });
+    expect("timeoutMs" in a).toBe(false);
+  });
+
+  it("forwards a normal read timeout unchanged", () => {
+    expect(toInvokeArgs("t", "/games", { timeout: 20000 }).timeoutMs).toBe(20000);
+  });
+
+  it("clamps an LLM/render timeout up to the host max of 180000", () => {
+    // api.js LLM_TIMEOUT_MS is 330000; the host hard-caps at 180000.
+    expect(toInvokeArgs("t", "/games/g/action", { method: "POST", timeout: 330000 }).timeoutMs).toBe(180000);
+  });
+
+  it("clamps below the host minimum up to 1000", () => {
+    expect(toInvokeArgs("t", "/x", { timeout: 100 }).timeoutMs).toBe(1000);
+  });
+
+  it("carries method + body through to args", () => {
+    const a = toInvokeArgs("t", "/games/g/action", { method: "POST", body: { action: "go" }, timeout: 5000 });
+    expect(a.args).toEqual({ path: "/games/g/action", method: "POST", body: { action: "go" } });
   });
 });
 

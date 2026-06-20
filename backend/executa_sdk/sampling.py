@@ -45,7 +45,14 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 PROTOCOL_VERSION_V1 = "1.1"
 PROTOCOL_VERSION_V2 = "2.0"
-MAX_STDIO_MESSAGE_BYTES = 512 * 1024
+# Frames larger than this spill to a temp file (file-transport) instead of being written
+# inline. The Anna Agent's stdio reader is an asyncio StreamReader with the DEFAULT 64KB
+# line limit, and a single JSON-RPC line over that limit crashes its reader loop
+# ("Separator is found, but chunk is longer than limit") and kills the executa mid-invoke.
+# That is exactly what an inlined image data-URI in a /state reply produces. So the spill
+# threshold MUST sit under 64KB (not the old 512KB, which let 64-512KB frames crash the
+# agent). Overridable via env for hosts with a different reader limit.
+MAX_STDIO_MESSAGE_BYTES = int(os.getenv("MAX_STDIO_MESSAGE_BYTES", str(56 * 1024)))
 
 METHOD_INITIALIZE = "initialize"
 METHOD_SHUTDOWN = "shutdown"
@@ -83,10 +90,14 @@ def _write_frame(msg: dict, *, stdout=None) -> None:
         stdout = sys.stdout
     payload = json.dumps(msg, ensure_ascii=False)
     payload_bytes = payload.encode("utf-8")
-    if len(payload_bytes) > MAX_STDIO_MESSAGE_BYTES:
-        # File transport — only valid for plugin → host responses, not for
-        # plugin-initiated reverse RPC requests. We still support it here
-        # for symmetry.
+    # File transport is valid ONLY for plugin -> host RESPONSES (a result/error frame, no
+    # "method"), NOT for plugin-initiated reverse-RPC REQUESTS (the host cannot resolve a
+    # request pointer). So spill only oversized RESPONSES; reverse-RPC requests are always
+    # written inline (the engine must keep them bounded below the reader limit). Spilling
+    # the response is what lets an image-bearing /state reply exceed the Agent's ~64KB
+    # stdio line limit without crashing its reader loop and killing the executa mid-invoke.
+    is_request = "method" in msg
+    if len(payload_bytes) > MAX_STDIO_MESSAGE_BYTES and not is_request:
         fd, tmp = tempfile.mkstemp(suffix=".json", prefix="executa-msg-")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -99,6 +110,12 @@ def _write_frame(msg: dict, *, stdout=None) -> None:
         )
         stdout.write(pointer + "\n")
     else:
+        if len(payload_bytes) > MAX_STDIO_MESSAGE_BYTES:
+            # An oversized reverse-RPC request can't use file transport; warn so a too-big
+            # prompt is diagnosable rather than silently crashing the host's reader.
+            print(f"[executa] WARNING: reverse-RPC '{msg.get('method')}' frame is "
+                  f"{len(payload_bytes)} bytes, over the {MAX_STDIO_MESSAGE_BYTES}-byte "
+                  f"stdio limit; the host reader may reject it.", file=sys.stderr, flush=True)
         stdout.write(payload + "\n")
     stdout.flush()
 

@@ -27,11 +27,12 @@ import os
 import sys
 import threading
 import traceback
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
 import httpx
 
-from executa_sdk import ImageClient, PROTOCOL_VERSION_V1, PROTOCOL_VERSION_V2, SamplingClient
+from executa_sdk import (ImageClient, InvokeContext, PROTOCOL_VERSION_V1,
+                         PROTOCOL_VERSION_V2, SamplingClient)
 from executa_sdk.sampling import _write_frame as _sdk_write_frame
 
 from . import db, hostbridge
@@ -39,7 +40,7 @@ from .config import settings
 from .main import app
 
 TOOL_ID = "tool-dev-gamentic"          # dev placeholder; the real id is server-minted at publish
-VERSION = "0.2.8"                      # single source of truth; mirrors pyproject + executa.json
+VERSION = "0.3.0"                      # single source of truth; mirrors pyproject + executa.json
                                        # (and the serverInfo below, so the agent stops reporting a
                                        # stale 0.1.0 next to the installed 0.2.x -> no false "upgrade")
 
@@ -76,7 +77,13 @@ MANIFEST = {
     # for an app-bundled executa run by the Anna agent (app host_api.agent.session.auto ->
     # sampling token), which is what fixes the -32001 "sampling token missing". Matches the
     # anna-app-llm-demo example. Without llm.sample declared, sampling is -32008 NOT_NEGOTIATED.
-    "host_capabilities": ["llm.sample", "llm.agent.auto"],
+    # llm.image lets the engine reverse-RPC image/generate on the AGENT path: there the host
+    # gates the executa's image reverse-RPC on THIS declaration (+ the per-app image_grant),
+    # not on the app manifest's ui.host_api.image (which is what the `anna-app dev` harness
+    # used, masking the gap). Without llm.image declared, image/generate is NOT_NEGOTIATED on
+    # an installed app even though the grant is enabled. The executa only generates (never
+    # edits), so llm.image alone; initialize advertises capabilities.image={} to match.
+    "host_capabilities": ["llm.sample", "llm.agent.auto", "llm.image"],
     "runtime": {"type": "uv", "min_version": "0.1.0"},
 }
 
@@ -205,6 +212,21 @@ async def _run_request(path: str, method: str, body, query) -> dict:
     return {"status": resp.status_code, "json": payload}
 
 
+def _invoke_budget_s(params: dict) -> float:
+    """Seconds this invoke may run before we MUST answer. Respect the host's own deadline
+    (params.context.deadline_ms) when it sends one, minus a margin so WE reply first;
+    otherwise fall back to the configured ceiling. Either way the executa never blocks long
+    enough for the host to decide it is hung and recycle it - that recycle is what took the
+    whole engine down when a render piled up behind the invoke."""
+    try:
+        rem = InvokeContext.from_params(params).remaining_s()
+    except Exception:
+        rem = float("inf")
+    if rem == float("inf"):
+        return settings.INVOKE_BUDGET_S
+    return max(5.0, min(settings.INVOKE_BUDGET_S, rem - settings.INVOKE_DEADLINE_MARGIN_S))
+
+
 def _do_invoke(params: dict) -> dict:
     if params.get("tool") != "request":
         return {"error": {"code": -32601, "message": f"unknown tool: {params.get('tool')}"}}
@@ -212,19 +234,27 @@ def _do_invoke(params: dict) -> dict:
     path = args.get("path")
     if not path or not isinstance(path, str):
         return {"result": {"success": False, "error": "missing 'path'"}}
+    budget = _invoke_budget_s(params)
+    fut = None
     try:
         _ensure_client()
         fut = asyncio.run_coroutine_threadsafe(
             _run_request(path, args.get("method", "GET"), args.get("body"), args.get("query")),
             _loop)
-        # BELOW the host's 600s per-tool invoke timeout on purpose: if a turn's renders
-        # run long, return a graceful {success:false} here rather than letting the host
-        # decide the executa is hung and RESTART it (which dropped every other in-flight
-        # call and surfaced "executa process exited" in the UI).
-        out = fut.result(timeout=540)
+        out = fut.result(timeout=budget)
         # Tool-level success: the HTTP status rides inside data so the frontend can
         # branch (a 404/422 from the engine is a normal answer, not a transport fail).
         return {"result": {"success": True, "data": out, "tool": "request"}}
+    except FuturesTimeoutError:
+        # We hit OUR budget before the host's deadline: ANSWER NOW so the host never sees a
+        # hung executa and restarts it. Cancel the in-flight request so it cannot linger on
+        # the loop. The frontend treats this as "not ready" and retries (idempotent GETs)
+        # or re-fires the render later - never a transport crash, never an engine recycle.
+        if fut is not None:
+            fut.cancel()
+        _log(f"invoke over budget ({budget:.0f}s); answered gracefully path={path}")
+        return {"result": {"success": False, "error": "engine busy, please retry",
+                           "timeout": True, "tool": "request"}}
     except Exception as exc:
         _log("invoke crashed:", repr(exc))
         _log(traceback.format_exc())

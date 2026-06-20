@@ -17,7 +17,7 @@ import pytest
 
 BACKEND = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONSOLE = "tool-gamentic-engine-7h8aweky"      # == [project.scripts] key == executa executable_name
-VERSION = "0.2.8"
+VERSION = "0.3.0"
 
 pytestmark = pytest.mark.skipif(shutil.which("uv") is None, reason="uv not installed")
 
@@ -101,7 +101,7 @@ def test_installed_wheel_describes(installed_console):
     assert init["serverInfo"]["version"] == VERSION
     assert man["version"] == VERSION
     assert [t["name"] for t in man["tools"]] == ["request"]
-    assert man["host_capabilities"] == ["llm.sample", "llm.agent.auto"]
+    assert man["host_capabilities"] == ["llm.sample", "llm.agent.auto", "llm.image"]
 
 
 def test_installed_wheel_serves_engine_route(installed_console):

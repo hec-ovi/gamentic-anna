@@ -1,7 +1,7 @@
 {
   "name": "gamentic",
   "display_name": "Gamentic",
-  "version": "0.2.8",
+  "version": "0.3.0",
   "description": "Gamentic game engine, exposed as an Anna Executa. One tool, `request`, replays an HTTP-style call against the engine.",
   "tools": [
     {
@@ -16,5 +16,5 @@
     }
   ],
   "credentials": [],
-  "host_capabilities": ["llm.sample", "llm.agent.auto"]
+  "host_capabilities": ["llm.sample", "llm.agent.auto", "llm.image"]
 }

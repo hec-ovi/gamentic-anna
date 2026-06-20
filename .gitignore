@@ -3,6 +3,9 @@
 *.db
 *.db-*
 
+# secrets (PyPI token for publishing the executa, etc.) - NEVER commit
+.secrets/
+
 # anna cli working dir (dev tokens, recordings, staged bundle)
 .anna/
 
