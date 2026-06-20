@@ -168,7 +168,8 @@ function actionsSection(d, stateChar, locked, presence) {
         <p class="absence-line">${escapeHtml(absenceLine(d, stateChar, presence.alive))}</p>
       </section>`;
   }
-  const actions = ((stateChar && stateChar.actions) || []).filter((a) => a.type !== "talk" && a.type !== "look" && a.type !== "search");
+  // Look/Search restored (images render again on Anna); talk stays out - the Whisper tab owns it.
+  const actions = ((stateChar && stateChar.actions) || []).filter((a) => a.type !== "talk");
   if (!actions.length) return "";
   return `
     <section class="profile-sec">

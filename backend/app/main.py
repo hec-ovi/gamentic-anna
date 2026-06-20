@@ -461,8 +461,10 @@ def render_image(gid: str, body: RenderIn):
     if kind == "item":
         if not body.id:
             raise HTTPException(422, "item name required")
-        integrate.generate_item_image(gid, body.id)
-        return {"kind": "item", "id": body.id}
+        integrate.generate_item_image(gid, body.id)               # renders only if missing
+        with db.get_conn() as conn:
+            entry = repo.visible_item_index(conn, gid).get(repo.item_key(body.id))
+        return {"kind": "item", "id": body.id, "image_url": (entry or {}).get("image_url")}
     raise HTTPException(422, f"unknown render kind: {kind!r}")
 
 

@@ -101,17 +101,37 @@ export function pollBurst(g) {
 // clear the agent's 64KB stdio frame limit. Serial + single-flight; slots each as it lands.
 let pumping = false;
 
+// The sandboxed iframe can only display an image we hold inline as a data: URI; a /media
+// path (what /state carries for a persisted-but-not-inlined image) is unfetchable there.
+const isDataUri = (u) => typeof u === "string" && u.startsWith("data:");
+
 export async function pumpRenders(g) {
   if (!g || !state.annaMode || pumping) return;
   if (!g.state || !g.state.imagesEnabled) return;
   pumping = true;
   try {
+    // An image needs (re)fetching unless we already hold it as a data: URI. The agent path
+    // delivers images inline via /render; a /state reply may instead carry a /media PATH
+    // (rendered, but not inlined under the per-reply budget), which the sandboxed iframe
+    // cannot load - so a non-data: value (null OR /media path) means "pull it via /render".
     const targets = [];
-    if (g.state.scene && !g.state.scene.imageUrl) targets.push({ kind: "scene" });
+    if (g.state.scene && !isDataUri(g.state.scene.imageUrl)) targets.push({ kind: "scene" });
     for (const c of g.state.characters || []) {
-      if (c.present && c.alive !== false && !c.faceUrl && !c.bodyUrl)
+      if (c.present && c.alive !== false && (!isDataUri(c.faceUrl) || !isDataUri(c.bodyUrl)))
         targets.push({ kind: "character", id: c.id });
     }
+    // Items: re-fetch any inventory thumbnail the engine already rendered but that came
+    // back as a /media path (so it persists across reloads). Keyed by name, deduped across
+    // the player pack, the scene, and every character's carried items.
+    const itemNames = new Set();
+    const scanItems = (items) =>
+      (items || []).forEach((it) => {
+        if (it && it.name && it.imageUrl && !isDataUri(it.imageUrl)) itemNames.add(it.name);
+      });
+    scanItems(g.state.player && g.state.player.inventory);
+    scanItems(g.state.scene && g.state.scene.items);
+    (g.state.characters || []).forEach((c) => scanItems(c.inventory));
+    for (const name of itemNames) targets.push({ kind: "item", id: name });
     for (const t of targets) {
       if (state.active !== g || state.view !== "play" || g.generating) break;
       try {
@@ -144,6 +164,20 @@ function slotRender(g, t, res) {
       return true;
     }
   }
+  if (t.kind === "item" && res.image_url) {
+    let slotted = false;
+    const apply = (items) =>
+      (items || []).forEach((it) => {
+        if (it && it.name === t.id) {
+          it.imageUrl = res.image_url;
+          slotted = true;
+        }
+      });
+    apply(g.state.player && g.state.player.inventory);
+    apply(g.state.scene && g.state.scene.items);
+    (g.state.characters || []).forEach((c) => apply(c.inventory));
+    return slotted;
+  }
   return false;
 }
 
@@ -155,6 +189,31 @@ export async function refreshArt(g) {
     const mapped = mapGameState(await api.getState(g.id));
     if (state.active !== g || g.generating) return; // turned stale while awaiting
     const prev = g.state;
+    // Never downgrade an image we already hold inline (data: URI) back to a /media path:
+    // /state carries /media paths for images not inlined under the per-reply budget, and the
+    // sandboxed iframe cannot load /media. Keep the delivered data: URI (pumpRenders fills
+    // anything still on a /media path). Without this, a /state refresh broke live portraits.
+    const keep = (next, prevUrl) => (isDataUri(prevUrl) && !isDataUri(next) ? prevUrl : next);
+    if (mapped.scene && prev.scene) mapped.scene.imageUrl = keep(mapped.scene.imageUrl, prev.scene.imageUrl);
+    for (const c of mapped.characters || []) {
+      const p = (prev.characters || []).find((x) => x.id === c.id);
+      if (p) {
+        c.faceUrl = keep(c.faceUrl, p.faceUrl);
+        c.bodyUrl = keep(c.bodyUrl, p.bodyUrl);
+      }
+    }
+    const prevItemUrls = new Map();
+    const idxItems = (items) => (items || []).forEach((it) => it && it.id && prevItemUrls.set(it.id, it.imageUrl));
+    idxItems(prev.player && prev.player.inventory);
+    idxItems(prev.scene && prev.scene.items);
+    (prev.characters || []).forEach((c) => idxItems(c.inventory));
+    const keepItems = (items) =>
+      (items || []).forEach((it) => {
+        if (it && it.id) it.imageUrl = keep(it.imageUrl, prevItemUrls.get(it.id));
+      });
+    keepItems(mapped.player && mapped.player.inventory);
+    keepItems(mapped.scene && mapped.scene.items);
+    (mapped.characters || []).forEach((c) => keepItems(c.inventory));
     const gainedPortrait = mapped.characters.some((c) => {
       const p = prev.characters.find((x) => x.id === c.id) || {};
       return (c.faceUrl && !p.faceUrl) || (c.bodyUrl && !p.bodyUrl);

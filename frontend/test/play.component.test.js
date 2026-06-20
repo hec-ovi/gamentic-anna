@@ -845,7 +845,7 @@ test("the play composer offers no Look mode (look disabled): only do/say", async
   expect(screen.queryByRole("textbox", { name: /what you look at/i })).toBeNull();
 });
 
-test("scene actions of type look/search are NOT rendered; a normal action still fires its turn", async () => {
+test("scene actions of type look/search ARE rendered again and a Look fires a look turn", async () => {
   const u = user();
   let body;
   const withActs = makeState({
@@ -867,12 +867,13 @@ test("scene actions of type look/search are NOT rendered; a normal action still 
     }),
   );
   await gotoPlay(u);
-  // the look/search base actions are filtered out of the deck
-  expect(screen.queryByRole("button", { name: /look around/i })).toBeNull();
-  expect(screen.queryByRole("button", { name: /^search$/i })).toBeNull();
-  // the normal action renders and fires a turn
-  await u.click(screen.getByRole("button", { name: /pry the bar/i }));
+  // Look/Search are back in the deck (images render again on Anna)
+  expect(screen.getByRole("button", { name: /look around/i })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^search$/i })).toBeTruthy();
+  // a Look fires a look turn
+  await u.click(screen.getByRole("button", { name: /look around/i }));
   await waitFor(() => expect(body).toBeTruthy());
+  expect(JSON.stringify(body)).toMatch(/look/);
   await screen.findByText("ok");
 });
 

@@ -90,6 +90,19 @@ def test_render_one_character_only(client, fake_llm, monkeypatch, tmp_path):
     assert other["face_url"] is None                               # the others stay unrendered
 
 
+def test_render_item_returns_image_url_for_slotting(client, fake_llm, monkeypatch, tmp_path):
+    # The item branch returns the item's image_url so the frontend can slot the inlined
+    # thumbnail (a missing/unknown item just returns null, never an error).
+    from app.config import settings
+    monkeypatch.setattr(settings, "IMAGE_ENABLED", True)
+    monkeypatch.setattr(settings, "GAMES_DATA_DIR", str(tmp_path))
+    gid = client.post("/games", json=WORLD).json()["game_id"]
+    r = client.post(f"/games/{gid}/render", json={"kind": "item", "id": "no-such-item"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["kind"] == "item" and "image_url" in body
+
+
 def test_render_rejects_bad_kind_and_missing_id(client, fake_llm, monkeypatch, tmp_path):
     from app.config import settings
     monkeypatch.setattr(settings, "IMAGE_ENABLED", True)
@@ -97,3 +110,4 @@ def test_render_rejects_bad_kind_and_missing_id(client, fake_llm, monkeypatch, t
     gid = client.post("/games", json=WORLD).json()["game_id"]
     assert client.post(f"/games/{gid}/render", json={"kind": "nope"}).status_code == 422
     assert client.post(f"/games/{gid}/render", json={"kind": "character"}).status_code == 422
+    assert client.post(f"/games/{gid}/render", json={"kind": "item"}).status_code == 422

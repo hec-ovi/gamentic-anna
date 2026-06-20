@@ -97,9 +97,9 @@ export function renderPlayDeck(s, locked, g = {}) {
   const desc = (scene && scene.description) || "";
   const mood = (scene && scene.status) || s.sceneStatus || null;
   const items = (scene && scene.items) || [];
-  // Look/Search are disabled: they map to a "look" turn whose only real payoff was
-  // the scene render, and images ship off (the 65s invoke cap). Drop them from the bar.
-  const actions = ((scene && scene.actions) || []).filter((a) => a.type !== "look" && a.type !== "search");
+  // Look/Search are back: images render again on Anna (synchronous per-image render +
+  // pumpRenders), so a look's payoff (the scene snapshot) lands. Keep the full action bar.
+  const actions = (scene && scene.actions) || [];
   const exits = (scene && scene.exits) || [];
   void g;
 

@@ -142,7 +142,7 @@ const SCENE_STATE = mapGameState({
     exits: [{ id: "e1", label: "the street", target: "street" }],
     items: [{ id: "i1", name: "bottle", description: "gin" }],
     available_actions: [
-      { id: "a1", label: "Look", type: "look" }, // filtered out: look is disabled
+      { id: "a1", label: "Look", type: "look" }, // rendered again: Look is back on Anna
       { id: "a2", label: "Pour a drink", type: "do" },
     ],
   },
@@ -206,7 +206,7 @@ test("the integrated deck renders exits, scene actions and the current goal in O
   assert.ok(deck, "one integrated header");
   assert.ok(deck.querySelector('[data-act="exit"][data-label="the street"]'), "exit button lives in the deck");
   assert.ok(deck.querySelector('[data-act="scene-action"][data-label="Pour a drink"]'), "scene action lives in the deck");
-  assert.equal(deck.querySelector('[data-act="scene-action"][data-label="Look"]'), null, "look/search scene actions are filtered out (look disabled)");
+  assert.ok(deck.querySelector('[data-act="scene-action"][data-label="Look"]'), "Look scene action is rendered again (images render on Anna)");
   assert.ok(/Find the brass key/.test(deck.querySelector(".hud-goal").textContent), "goal chip lives in the deck");
   assert.ok(deck.querySelector(".scene-name"), "scene identity lives in the deck");
   assert.equal(el.querySelector(".scene-band"), null, "no separate scene band below the header");

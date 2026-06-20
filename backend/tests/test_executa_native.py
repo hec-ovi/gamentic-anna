@@ -180,7 +180,7 @@ def test_native_full_adventure(host):
     # This is the manifest the live app uses; images are disabled in the app build.
     assert man["host_capabilities"] == ["llm.sample", "llm.agent.auto", "llm.image"]
     assert [t["name"] for t in man["tools"]] == ["request"]
-    assert man["version"] == "0.3.1"            # synced: serverInfo + describe + pyproject + executa.json + app
+    assert man["version"] == "0.2.11"           # synced: serverInfo + describe + pyproject + executa.json + app
 
     # empty library, then create a world (no LLM: the WorldSheet is posted directly)
     assert host.invoke("/games")["json"] == {"games": []}
