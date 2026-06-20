@@ -4,7 +4,7 @@
   "name": "Gamentic",
   "version": "0.2.11",
   "executa_type": "tool",
-  "description": "Gamentic game engine, exposed as an Anna Executa. One tool, `request`, replays an HTTP-style call against the engine.",
+  "description": "Gamentic game engine, exposed as an Anna Executa. One tool, `request`, replays an HTTP-style call against the engine. Synchronous per-image render (/render) for the agent path; r0.2.11.",
   "tool_id": "tool-dev-gamentic",
   "type": "python",
   "enabled": true,
