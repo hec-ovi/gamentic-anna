@@ -5,7 +5,7 @@ import { mapBeats, mapGameState } from "../adapters.js";
 import { diffState } from "../transitions.js";
 import { api, root, state } from "./ctx.js";
 import { applyTransitions, showToast } from "./cues.js";
-import { pullBeats, pollBurst, pumpRenders } from "./mediastream.js";
+import { pullBeats, pollBurst, pumpRenders, preserveDeliveredArt } from "./mediastream.js";
 import { refreshProfile } from "./profilectl.js";
 import { startReveal } from "./reveal.js";
 import { withVoice } from "./speech.js";
@@ -135,7 +135,10 @@ export async function resolveTurn(g, send, { look = false, echo = null, restore 
     const turn = await send();
     g.beats = g.beats.filter((b) => !b.pending); // the canonical echoes replace ours
     const prevState = g.state;
-    g.state = mapGameState(turn.state);
+    // keep portraits/scene/item art we already delivered inline: a turn's state
+    // carries /media paths the iframe can't load, and replacing wholesale blinks
+    // the live image out (and triggers a re-render loop). pumpRenders fills the rest.
+    g.state = preserveDeliveredArt(prevState, mapGameState(turn.state));
     g.changes = diffState(prevState, g.state); // what transitioned this turn
     const seen = new Set(g.beats.map((b) => b.id));
     const newBeats = mapBeats(turn.beats || [])

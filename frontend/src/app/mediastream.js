@@ -105,6 +105,37 @@ let pumping = false;
 // path (what /state carries for a persisted-but-not-inlined image) is unfetchable there.
 const isDataUri = (u) => typeof u === "string" && u.startsWith("data:");
 
+// Carry a delivered inline image (data: URI) forward when a fresh state snapshot
+// (a turn response or a /state refresh) would otherwise replace it with a /media
+// path the sandboxed iframe can't load. Without this the portrait we just rendered
+// blinks out on the next turn, and pumpRenders re-requests it -> visible flicker +
+// a re-render loop. Mutates and returns `next`.
+export function preserveDeliveredArt(prev, next) {
+  if (!prev || !next) return next;
+  const keep = (n, p) => (isDataUri(p) && !isDataUri(n) ? p : n);
+  if (next.scene && prev.scene) next.scene.imageUrl = keep(next.scene.imageUrl, prev.scene.imageUrl);
+  for (const c of next.characters || []) {
+    const p = (prev.characters || []).find((x) => x.id === c.id);
+    if (p) {
+      c.faceUrl = keep(c.faceUrl, p.faceUrl);
+      c.bodyUrl = keep(c.bodyUrl, p.bodyUrl);
+    }
+  }
+  const prevItems = new Map();
+  const idx = (items) => (items || []).forEach((it) => it && it.id && prevItems.set(it.id, it.imageUrl));
+  idx(prev.player && prev.player.inventory);
+  idx(prev.scene && prev.scene.items);
+  (prev.characters || []).forEach((c) => idx(c.inventory));
+  const keepItems = (items) =>
+    (items || []).forEach((it) => {
+      if (it && it.id) it.imageUrl = keep(it.imageUrl, prevItems.get(it.id));
+    });
+  keepItems(next.player && next.player.inventory);
+  keepItems(next.scene && next.scene.items);
+  (next.characters || []).forEach((c) => keepItems(c.inventory));
+  return next;
+}
+
 export async function pumpRenders(g) {
   if (!g || !state.annaMode || pumping) return;
   if (!g.state || !g.state.imagesEnabled) return;

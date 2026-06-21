@@ -40,7 +40,7 @@ from .config import settings
 from .main import app
 
 TOOL_ID = "tool-dev-gamentic"          # dev placeholder; the real id is server-minted at publish
-VERSION = "0.2.11"                     # matches Anna's server-assigned executa version (it
+VERSION = "0.2.12"                     # matches Anna's server-assigned executa version (it
                                        # auto-increments the patch from the last, ignoring a
                                        # bigger bump); mirrors pyproject + executa.json + PyPI
                                        # (and the serverInfo below, so the agent stops reporting a
@@ -118,7 +118,7 @@ _MEDIA_PREFIX = "/media/"
 # well under 64KB: one image (~10-20KB at the size below) fits, and a multi-image /state
 # inlines a couple then leaves the rest as /media paths for the frontend to pull one at a
 # time via POST /games/{id}/render (which returns a single small image). Env-tunable.
-_INLINE_BUDGET = int(os.getenv("INLINE_BUDGET", "40000"))
+_INLINE_BUDGET = int(os.getenv("INLINE_BUDGET", "58000"))
 
 
 def _media_path(url: str) -> str | None:
@@ -129,8 +129,8 @@ def _media_path(url: str) -> str | None:
     return os.path.join(settings.GAMES_DATA_DIR, gid, "images", name)
 
 
-def _data_uri(fp: str, max_px: int = int(os.getenv("INLINE_IMAGE_MAX_PX", "400")),
-              quality: int = int(os.getenv("INLINE_IMAGE_QUALITY", "58"))) -> str | None:
+def _data_uri(fp: str, max_px: int = int(os.getenv("INLINE_IMAGE_MAX_PX", "320")),
+              quality: int = int(os.getenv("INLINE_IMAGE_QUALITY", "50"))) -> str | None:
     # Small + lower-quality on purpose: each inlined image is ~10-20KB so a single render
     # reply (and a couple in /state) stays under the Agent's 64KB stdio frame limit.
     try:
@@ -147,18 +147,28 @@ def _data_uri(fp: str, max_px: int = int(os.getenv("INLINE_IMAGE_MAX_PX", "400")
         return None
 
 
-def _inline_media(obj, budget: list[int]):
+def _inline_media(obj, budget: list[int], cache: dict | None = None):
+    # cache: same /media path inlined once per reply, reused for free (a character
+    # render returns the body twice as body_url AND body_front_url - without this the
+    # duplicate double-counted the budget and pushed the displayed image out to a
+    # /media path the iframe can't load -> broken portrait + a re-request loop).
+    if cache is None:
+        cache = {}
     if isinstance(obj, dict):
-        return {k: _inline_media(v, budget) for k, v in obj.items()}
+        return {k: _inline_media(v, budget, cache) for k, v in obj.items()}
     if isinstance(obj, list):
-        return [_inline_media(v, budget) for v in obj]
-    if isinstance(obj, str) and obj.startswith(_MEDIA_PREFIX) and budget[0] > 0:
-        fp = _media_path(obj)
-        if fp and os.path.isfile(fp):
-            uri = _data_uri(fp)
-            if uri and len(uri) <= budget[0]:
-                budget[0] -= len(uri)
-                return uri
+        return [_inline_media(v, budget, cache) for v in obj]
+    if isinstance(obj, str) and obj.startswith(_MEDIA_PREFIX):
+        if obj in cache:
+            return cache[obj]
+        if budget[0] > 0:
+            fp = _media_path(obj)
+            if fp and os.path.isfile(fp):
+                uri = _data_uri(fp)
+                if uri and len(uri) <= budget[0]:
+                    budget[0] -= len(uri)
+                    cache[obj] = uri
+                    return uri
     return obj
 
 

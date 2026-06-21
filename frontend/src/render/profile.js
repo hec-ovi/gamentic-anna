@@ -269,10 +269,11 @@ export function renderWhisperChannel(s, g, d, locked) {
            id: "pm",
            mode: pf.mode,
            locked,
-           modes: ["say", "do"],
+           modes: ["say", "do", "look"],
            placeholders: {
              say: `Whisper to ${name}...`,
              do: `A discreet act only ${name} notices...`,
+             look: `Study ${name} quietly (blank = a quiet once-over)...`,
            },
            submitLabel: locked ? "Resolving..." : "Whisper",
          })}

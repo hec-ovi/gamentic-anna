@@ -85,7 +85,7 @@ export function unstackSegment(holder, index) {
 export function executeComposer() {
   const g = state.active;
   if (!g || g.generating) return;
-  const cmp = g.composer || (g.composer = { mode: "do", stack: [] });
+  const cmp = g.composer || (g.composer = { mode: "say", stack: [] });
   const input = root.querySelector("#cmpInput");
   const { text, refs } = serializeComposer(input);
   clearComposer(input);

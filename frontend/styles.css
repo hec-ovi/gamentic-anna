@@ -884,7 +884,7 @@ button.slot.item-scenery:hover { border-color: var(--gold); box-shadow: 0 0 10px
 .char-col:hover { box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent), 0 12px 34px color-mix(in srgb, var(--shadow-tint) 45%, transparent); transform: translateY(-3px); }
 .char-col.dead { filter: grayscale(0.85); opacity: 0.6; }
 
-.col-art { position: relative; width: 100%; aspect-ratio: 3 / 5; overflow: hidden; background: color-mix(in srgb, var(--surface-page-2) 60%, transparent); }
+.col-art { position: relative; width: 100%; aspect-ratio: 3 / 4.8; overflow: hidden; background: color-mix(in srgb, var(--surface-page-2) 60%, transparent); }
 /* Images off: there is no portrait to fill the tall 3:5 column, only the initial,
    so collapse the art panel to roughly half height instead of a big empty box. */
 .col-art:has(.col-body.art-off) { aspect-ratio: 3 / 2.5; }

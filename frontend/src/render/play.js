@@ -253,7 +253,7 @@ export function castRow(c, g = {}) {
 
 
 export function renderActionBar(g, s, locked) {
-  const cmp = g.composer || { mode: "do", stack: [] };
+  const cmp = g.composer || { mode: "say", stack: [] };
   const dis = locked ? "disabled" : "";
   return `
     <footer class="play-actionbar">
@@ -268,10 +268,11 @@ export function renderActionBar(g, s, locked) {
           id: "cmp",
           mode: cmp.mode,
           locked,
-          modes: ["do", "say"],
+          modes: ["say", "do", "look"],
           placeholders: {
-            do: "Do or say anything... (Enter sends)",
-            say: "What do you say?",
+            say: "What do you say? (Enter sends)",
+            do: "What do you do?",
+            look: "What do you look at? (blank = the whole scene)",
           },
           submitLabel: "Send",
         })}
