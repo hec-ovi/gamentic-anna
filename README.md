@@ -2,7 +2,7 @@
 
 Describe a world in one sentence, then **play it** turn by turn: a live narrator, characters you talk and whisper to, an inventory you loot and gift, scene changes, new characters on the fly, quests, and generated art (scenes, portraits, item cards, look shots). It runs **natively as an Anna App**, with no GPU, no third-party bridge, and no bundled model: the engine reverse-RPCs Anna's own host for every token and every image.
 
-> 🖼️ **How images stay off the hot path.** A render takes 35-90s, so none ever runs inside a tool invoke (the manifest raises the per-invoke timeout to 600s, and renders run detached anyway). They render up to two at a time, player-triggered looks get their own lane, an in-flight claim registry stops the self-heal from rendering the same asset twice, and a failing asset stops retrying after `IMAGE_HEAL_MAX_ATTEMPTS` passes. The iframe pulls each finished image once through `GET /media64` (a cached data URI) instead of every reply re-shipping base64.
+> 🖼️ **How images stay off the hot path.** A render takes 35-90s, so none ever runs inside a tool invoke (the manifest raises the per-invoke timeout to 600s, and renders run detached anyway). They render up to two at a time, player-triggered looks get their own lane, an in-flight claim registry stops the self-heal from rendering the same asset twice, and a failing asset stops retrying after `IMAGE_HEAL_MAX_ATTEMPTS` passes (counted in the DB, so restarts don't reopen the loop). Anna's image quota is a rolling per-invoke window, so creation spends it on what shows first (the scene, then one face per character) and pauses instead of burning attempts when the window is spent; the UI says why art is waiting. The iframe pulls finished images in batches through `/media64/batch` (downscaled data URIs, disk-cached across restarts) instead of one host round-trip each.
 
 ## 📸 Screenshots
 
@@ -55,7 +55,8 @@ Anna AI-Native App Hackathon. A working app running on Anna today: an Anna **App
 | 🎒 **Inventory** | Take items from a scene, give items to characters; deterministic, model-independent. |
 | 🚪 **World** | Scene transitions, new characters spawned on the fly, exits revealed as you explore. |
 | 🧠 **Memory** | Each character keeps a private rolling memory; the story keeps a recap, so context stays bounded. |
-| 🖼️ **Art** | Scene images, character portraits (3-view reference sets), item unlock cards and look shots via Anna's image host, rendered in the background and slotted in as they land. |
+| 🖼️ **Art** | Scene images, character portraits (3-view reference sets), item unlock cards and look shots via Anna's image host, rendered in the background and slotted in as they land. A library switch turns images off per install (painted art stays). |
+| 📤 **Share** | Export any adventure as JSON (a fresh-start template or a full checkpoint) and import it anywhere; inside Anna it copies through a modal, since the sandbox blocks downloads. |
 
 **Why it's robust:** the core mechanics (movement, take, give, dialogue cueing, world seeding) are **deterministic engine-side**, so gameplay holds up even on models that won't reliably emit tool calls. The model writes the prose and dialogue; the rules (what's possible, what each action does) are enforced in code.
 
@@ -65,11 +66,11 @@ The Anna build hides what cannot pay off there:
 
 | Trimmed | Why |
 |---|---|
-| 🔍 **Look / Search** | Follow the images switch: a look turn's payoff is the render, so the composer mode, the scene action bar and the character panel only offer them while `IMAGE_ENABLED` is on. |
+| 🔍 **Look / Search** | Follow the images switch (the library toggle, `IMAGE_ENABLED` env as default): a look turn's payoff is the render, so the composer mode, the scene action bar and the character panel only offer them while images are on. |
 | 🔊 **Voice / speaker icon** | Anna has no host TTS, so the per-line speak button would never play. Hidden in Anna mode. |
 | 🎁 **Give** | Handing an item to a character closes the popups and drops you back on the main screen, rather than opening their whisper thread. |
 
-Resume is resilient to the harness recycling the executa: idempotent reads (state, beats, library) retry a few times before surfacing an error, so re-opening an adventure no longer bounces you to the menu when the executa cycles mid-open.
+Resume is resilient to the agent runtime recycling the executa: idempotent reads (state, beats, library) retry a few times before surfacing an error, so re-opening an adventure no longer bounces you to the menu when the executa cycles mid-open.
 
 ## 🏗️ Architecture (one glance)
 
@@ -96,8 +97,8 @@ Top to bottom is the call path: the iframe UI invokes the Executa, which runs th
 
 - **Backend** (`backend/app/executa.py`): the FastAPI engine wrapped as a stdio Executa. Each invoke replays an HTTP-style call against the in-process app (httpx ASGI transport), so every route, its validation and its behavior are exactly what uvicorn serves.
 - **Reverse-RPC** (`backend/app/hostbridge.py`): for text, images and reference uploads the engine calls the Anna host directly (`sampling/createMessage`, `image/generate`, `host/uploadFile`) via the vendored `executa_sdk`, with bounded retries on transient gateway errors.
-- **Non-blocking jobs** (`backend/app/main.py`, `backend/app/integrate/jobs.py`): renders, summary folds and origin enrichment run on a detached pool, never on the request thread. Renders take two lanes (ambient width `IMAGE_CONCURRENCY`, player looks on their own), an in-flight claim registry keeps the per-turn self-heal from double-rendering, and per-asset attempt ceilings stop a failing render from retrying forever. The frontend polls `/state` and `/beats` to pick up results.
-- **Media delivery**: every image persists under `/media/<game>/` and replies carry only that small ref; the sandboxed iframe resolves each ref once through `GET /media64/{gid}/{name}` (a downscaled data URI, mtime-cached server-side, cached in a Map browser-side).
+- **Non-blocking jobs** (`backend/app/main.py`, `backend/app/integrate/jobs.py`): renders, summary folds and origin enrichment run on a detached pool, never on the request thread. Renders take two lanes (ambient width `IMAGE_CONCURRENCY`, player looks on their own), an in-flight claim registry keeps the per-turn self-heal from double-rendering, per-asset attempt ceilings persist in the DB (a restart cannot reopen a failing render's loop), and a spent image-quota window pauses ambient renders instead of burning attempts. The frontend polls `/state` and `/beats` to pick up results.
+- **Media delivery**: every image persists under `/media/<game>/` and replies carry only that small ref; the sandboxed iframe resolves refs in batches through `POST /media64/batch` (downscaled data URIs, cached on disk server-side and in a Map browser-side), one host round-trip per dozen images instead of per image.
 - **Tool calls** (`backend/app/llm.py`): Anna sampling has no OpenAI-style function calling but does structured JSON, so the engine asks for a `{prose, tool_calls}` envelope and parses it back with a tolerant local repair (no network round-trip).
 - **Frontend** (`frontend/src/app/anna.js`): the UI runs in Anna's sandboxed iframe and routes through the injected transport; standalone dev falls back to `fetch`.
 - **Storage**: embedded SQLite under the Agent-provided `EXECUTA_DATA` dir, one per install. Voice is off (Anna has no TTS).
@@ -130,7 +131,7 @@ docs/RELEASE.md          the ship-a-release checklist
 
 ## 🧪 Tests
 
-**600 backend + 247 frontend tests pass.**
+**608 backend + 257 frontend tests pass.**
 
 ```sh
 # frontend (vitest + Testing Library, msw, jsdom)
@@ -147,5 +148,5 @@ cd backend && uv venv && uv pip install -e . pytest && .venv/bin/python -m pytes
 
 - **Keep slow work off the invoke.** The manifest raises the per-invoke timeout to 600s, but the reverse-RPC token dies about 600s after its invoke too, so anything slow (renders above all) runs detached and concurrently; the per-turn self-heal picks up whatever a dead token dropped.
 - **Token budget:** Anna's executa-side sampling makes `max_tokens` mandatory and caps it at 8192; the engine always passes the maximum and shapes length through the prompt, never a truncating ceiling.
-- **Images:** generated images come back as short-lived host URLs; the engine persists each per game under `/media`, and the iframe pulls each one once via `GET /media64` (see Architecture). Identity references (a character's stored view) upload to the host via `host/uploadFile` because the host can only fetch references over HTTPS.
+- **Images:** generated images come back as short-lived host URLs (~30 min); the engine persists each per game under `/media`, and the iframe pulls them in batches via `/media64` (see Architecture). Identity references (a character's stored view) upload to the host via `host/uploadFile` because the host can only fetch references over HTTPS. Anna's image quota is a rolling per-invoke window (default ~4 images per 30 min), which is why creation renders the scene and faces first and lets the per-turn heal finish the rest.
 - **Publishing:** the Executa is published to Anna's Executa Hub and referenced by `tool_id`; on Install Essentials the user's Agent runs `uv tool install <package>==<version>` from **PyPI** (`backend/pyproject.toml` builds the wheel; one `py3-none-any` artifact plus uv-resolved dependency wheels cover every platform). A wheel URL does not work here because the Agent always appends `==<version>`, which only a package name (not a URL) resolves. Release checklist: [docs/RELEASE.md](docs/RELEASE.md).
