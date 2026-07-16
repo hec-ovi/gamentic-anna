@@ -86,9 +86,11 @@ _FULL_SET = {"face_url": "/image/file?f=face", "body_front_url": "/image/file?f=
              "body_side_url": "/image/file?f=side"}
 
 
-def test_partial_url_set_is_rescheduled_and_completed(client, fake_llm, monkeypatch, tmp_path):
+def test_partial_url_set_is_rescheduled_and_completed_view_by_view(client, fake_llm,
+                                                                   monkeypatch, tmp_path):
     """A partial reference set (one url committed, the rest crashed) counts as MISSING:
-    the per-turn self-heal re-schedules the job and the render completes the full set."""
+    the per-turn self-heal re-schedules the job, which renders ONLY the missing views
+    (never the whole set again - the full re-render every turn was the render loop)."""
     _setup(monkeypatch, tmp_path)
     gid = client.post("/games", json=WORLD).json()["game_id"]
     ana = _char(client, gid, "Ana")
@@ -99,17 +101,26 @@ def test_partial_url_set_is_rescheduled_and_completed(client, fake_llm, monkeypa
     monkeypatch.setattr(integrate, "generate_images_for_game", lambda g: scheduled.append(g))
     client.post(f"/games/{gid}/action", json={"action": "I look around."})
     assert gid in scheduled                              # a face alone is not a set
-    monkeypatch.setattr(media, "generate_character_images",
-                        lambda d, style="", seed=None: dict(_FULL_SET))
+
+    def _no_full_set(d, style="", seed=None):
+        raise AssertionError("partial set must heal view-by-view, never re-render the full set")
+    monkeypatch.setattr(media, "generate_character_images", _no_full_set)
+    views = []
+    monkeypatch.setattr(media, "generate_character_view",
+                        lambda d, style, view, reference=None, seed=None:
+                        views.append(view) or f"/image/file?f={view}")
     heal(gid)
+    assert sorted(views) == ["front", "side"]            # the face never re-rendered
     ana = _char(client, gid, "Ana")
-    assert ana["face_url"] and ana["body_front_url"] and ana["body_side_url"]
+    assert ana["face_url"] == f"/media/{gid}/x-face.png"  # the committed face survives
+    assert ana["body_front_url"] and ana["body_side_url"]
 
 
-def test_partial_files_on_disk_rerender_the_full_set(client, fake_llm, monkeypatch, tmp_path):
-    """A partial set ON DISK re-renders the full set (the renderer overwrites the partial
-    files; _persist writes fixed names). Relinking it would re-schedule forever without
-    ever completing the set."""
+def test_partial_files_on_disk_relink_and_only_missing_views_render(client, fake_llm,
+                                                                    monkeypatch, tmp_path):
+    """A partial set ON DISK is relinked as-is and only the missing views render (the
+    old all-or-nothing rule re-rendered the whole set - and looped forever when one
+    view kept failing)."""
     _setup(monkeypatch, tmp_path)
     gid = client.post("/games", json=WORLD).json()["game_id"]
     ana = _char(client, gid, "Ana")
@@ -117,13 +128,52 @@ def test_partial_files_on_disk_rerender_the_full_set(client, fake_llm, monkeypat
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, f"char-{ana['id']}-face.png"), "wb") as f:
         f.write(b"PNG")                                  # face only: an interrupted run
-    rendered = []
-
-    def _gen(descriptor, style="", seed=None):
-        rendered.append(descriptor)
-        return dict(_FULL_SET)
-    monkeypatch.setattr(media, "generate_character_images", _gen)
+    views = []
+    monkeypatch.setattr(media, "generate_character_view",
+                        lambda dsc, style, view, reference=None, seed=None:
+                        views.append((view, reference)) or f"/image/file?f={view}")
     integrate.generate_images_for_game(gid)
-    assert any("female" in r for r in rendered)          # Ana re-rendered, not relinked
+    assert sorted(v for v, _ in views) == ["front", "side"]
+    # the healed views are identity-conditioned on the face that survived on disk
+    assert all(ref and "char-" in ref and "-face" in ref for v, ref in views)
     ana = _char(client, gid, "Ana")
-    assert ana["face_url"] and ana["body_front_url"] and ana["body_side_url"]
+    assert ana["face_url"] == f"/media/{gid}/char-{ana['id']}-face.png"   # relinked
+    assert ana["body_front_url"] and ana["body_side_url"]
+
+
+def test_failing_set_stops_re_rendering_after_the_attempt_ceiling(client, fake_llm,
+                                                                  monkeypatch, tmp_path):
+    """THE LOOP FIX: a set whose renders keep failing burns one heal attempt per failed
+    pass and goes quiet at IMAGE_HEAL_MAX_ATTEMPTS, instead of re-rendering every turn
+    forever. A later success on another path clears the meter."""
+    _setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(settings, "IMAGE_HEAL_MAX_ATTEMPTS", 3)
+    gid = client.post("/games", json=WORLD).json()["game_id"]
+    from app.integrate import jobs
+    jobs._heal_attempts.clear()      # creation's (stubbed, failing) pass burned one
+    passes = []
+    monkeypatch.setattr(media, "generate_character_images",
+                        lambda d, style="", seed=None: passes.append(d) or None)
+    for _ in range(6):                                   # six turns' worth of self-heals
+        integrate.generate_images_for_game(gid)
+    # 2 characters x 3 allowed passes = 6 render attempts, then silence
+    assert len(passes) == 6
+    integrate.generate_images_for_game(gid)
+    assert len(passes) == 6                              # exhausted: no more renders
+
+
+def test_partial_render_result_persists_what_landed(client, fake_llm, monkeypatch, tmp_path):
+    """A set render that returns only SOME views persists those views (the old code
+    persisted all-or-nothing via the same dict, writing None over nothing lost, but a
+    later heal then re-rendered everything). The landed face survives; only front/side
+    remain missing for the next pass."""
+    _setup(monkeypatch, tmp_path)
+    gid = client.post("/games", json=WORLD).json()["game_id"]
+    monkeypatch.setattr(media, "generate_character_images",
+                        lambda d, style="", seed=None: {"face_url": "/image/file?f=face",
+                                                        "body_front_url": None,
+                                                        "body_side_url": None})
+    integrate.generate_images_for_game(gid)
+    ana = _char(client, gid, "Ana")
+    assert ana["face_url"] and ana["face_url"].startswith(f"/media/{gid}/char-")
+    assert not ana["body_front_url"] and not ana["body_side_url"]

@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import re
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
@@ -91,15 +92,33 @@ def create_game(sheet: WorldSheet, background_tasks: BackgroundTasks):
     return {"game_id": gid}
 
 
-@app.get("/media/{gid}/{name}")
-def media_file(gid: str, name: str):
-    """Serve a game's persisted image from its per-game folder."""
-    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
-        raise HTTPException(404, "not found")
+def _media_file_path(gid: str, name: str) -> str:
+    """Validated on-disk path for a game image, or 404. Both segments must be plain
+    names: the charset allows dots, so all-dot traversal names are rejected apart."""
+    for seg in (gid, name):
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", seg) or seg.strip(".") == "":
+            raise HTTPException(404, "not found")
     path = os.path.join(settings.GAMES_DATA_DIR, gid, "images", name)
     if not os.path.isfile(path):
         raise HTTPException(404, "not found")
-    return FileResponse(path)
+    return path
+
+
+@app.get("/media/{gid}/{name}")
+def media_file(gid: str, name: str):
+    """Serve a game's persisted image from its per-game folder."""
+    return FileResponse(_media_file_path(gid, name))
+
+
+@app.get("/media64/{gid}/{name}")
+def media_data_uri(gid: str, name: str):
+    """The same image as a downscaled data: URI, for the Anna iframe (it cannot fetch
+    /media over HTTP; it pulls each image once through the invoke transport and caches
+    it browser-side). Encoded once per file and cached by mtime server-side."""
+    uri = media.image_data_uri(_media_file_path(gid, name))
+    if not uri:
+        raise HTTPException(502, "image could not be encoded")
+    return {"uri": uri}
 
 
 @app.get("/games")
@@ -263,11 +282,25 @@ def get_beats(gid: str, since: int = 0):
     return {"beats": [{k: r[k] for k in fields} for r in rows]}
 
 
+# One turn at a time PER GAME. The frontend's `generating` flag is per-tab; a second
+# tab (or a client retry) could run two turns concurrently for one game, and the
+# non-atomic next_turn_index read then writes two interleaved turns at the SAME
+# (turn_index, seq) coordinates into the permanent log. Process-local by design:
+# one process owns a game (plain REST, embedded SQLite).
+_TURN_LOCKS: dict[str, threading.Lock] = {}
+_TURN_LOCKS_GUARD = threading.Lock()
+
+
+def _turn_lock(gid: str) -> threading.Lock:
+    with _TURN_LOCKS_GUARD:
+        return _TURN_LOCKS.setdefault(gid, threading.Lock())
+
+
 def _resolved_turn(gid: str, background_tasks: BackgroundTasks, text: str = "",
                    segments=None, continue_story: bool = False,
                    wish: str | None = None) -> dict:
     """Run one full turn and schedule its background art (shared by action/continue)."""
-    with db.get_conn() as conn:
+    with _turn_lock(gid), db.get_conn() as conn:
         if not repo.get_game(conn, gid):
             raise HTTPException(404, "game not found")
         echo = None

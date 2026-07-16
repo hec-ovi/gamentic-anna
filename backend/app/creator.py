@@ -301,8 +301,13 @@ def quick_create(conn, prompt: str) -> str:
     except Exception:
         data = {}                               # any failure -> the deterministic fallback
     # _coerce_quick_sheet backfills every required piece, so an empty data dict here still
-    # yields a fully playable themed world built from the prompt.
-    sheet = _coerce_quick_sheet(prompt, data)
+    # yields a fully playable themed world built from the prompt. The coercion itself is
+    # guarded too: model output can hold shapes pydantic rejects even after backfill
+    # (live: quest objectives as a plain string), and quick_create must NEVER raise.
+    try:
+        sheet = _coerce_quick_sheet(prompt, data)
+    except Exception:
+        sheet = _coerce_quick_sheet(prompt, {})   # deterministic fallback, always valid
     gid = repo.create_game(conn, sheet)
     _seed_sheet_extras(conn, gid, sheet)
     return gid

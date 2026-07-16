@@ -5,6 +5,7 @@ import { mapBeats, mapGameState } from "../adapters.js";
 import { clearCreatorSession, resetCreator } from "./creatorctl.js";
 import { api, root, state, voice } from "./ctx.js";
 import { showToast } from "./cues.js";
+import { resetMediaCache } from "./mediacache.js";
 import { withVoice } from "./speech.js";
 import { lastTurnIndexOf } from "./turns.js";
 import { stopMediaWatch, watchMedia } from "./mediastream.js";
@@ -36,6 +37,7 @@ export async function wipeEverything() {
   try {
     await api.wipeAll();
     stopMediaWatch();
+    resetMediaCache(); // a fresh world must not surface a dead game's cached art
     voice.stop();
     voice.flush();
     state.active = null;

@@ -10,7 +10,9 @@ on any failure these return empty/None and the game stays fully playable text-on
 Gated by IMAGE_ENABLED / voice_enabled() (VOICE_ENABLED, and quiet in Anna mode).
 """
 import base64
+import io
 import logging
+import os
 import threading
 from urllib.parse import parse_qs, urlsplit
 
@@ -136,12 +138,40 @@ def purge_all_audio() -> int | None:
 
 # ---------- image ----------
 
-# ONE render at a time, orchestrator-wide (owner decision, 2026-06-11): background
-# tasks already serialize within a request and ComfyUI queues internally, but two
-# requests (a creation and a turn, two games) could still overlap renders. The gate
-# makes "submit, wait, next" a guarantee instead of an accident, whatever provider
-# is active.
-_RENDER_GATE = threading.Lock()
+# Render gating is LANE- and PROVIDER-aware.
+#
+# Local stack (comfy / cloud dialects): ONE render at a time, orchestrator-wide
+# (owner decision, 2026-06-11) - background tasks already serialize within a request
+# and ComfyUI queues internally, but two requests (a creation and a turn, two games)
+# could still overlap renders. The single lock makes "submit, wait, next" a guarantee.
+#
+# Anna host path: the host takes concurrent image/generate reverse-RPCs (each is its
+# own pending future in the SDK), and every render rides a per-invoke token that dies
+# ~600s after its invoke - strict serialization of a creation pass (3 renders per
+# character + item cards + the scene) blows that TTL and the tail renders fail with
+# auth errors. So ambient renders (portraits, scene art, item cards) share a semaphore
+# of IMAGE_CONCURRENCY slots, and player-facing renders (a look's view snapshot, the
+# narrator's show_image shot) get their OWN single-slot lane so they never queue
+# behind a long background backlog.
+_LOCAL_GATE = threading.Lock()
+_INTERACTIVE_GATE = threading.Lock()
+_ambient_gate = None
+_ambient_width = None
+_ambient_lock = threading.Lock()
+
+
+def _render_gate(interactive: bool = False):
+    if not hostbridge.active():
+        return _LOCAL_GATE
+    if interactive:
+        return _INTERACTIVE_GATE
+    global _ambient_gate, _ambient_width
+    with _ambient_lock:
+        # rebuilt if the width setting changed (tests); cheap either way
+        if _ambient_gate is None or _ambient_width != settings.IMAGE_CONCURRENCY:
+            _ambient_width = settings.IMAGE_CONCURRENCY
+            _ambient_gate = threading.BoundedSemaphore(_ambient_width)
+        return _ambient_gate
 
 
 def _provider() -> image_providers.ImageProvider:
@@ -159,11 +189,68 @@ def generate_character_images(descriptor: str, style: str = "", seed: int | None
     if not settings.IMAGE_ENABLED or not descriptor.strip():
         return None
     try:
-        with _RENDER_GATE:
+        with _render_gate():
             return _provider().character_set(descriptor, style, seed=seed)
     except Exception as exc:
         logging.getLogger("gamentic.image").warning("character_set swallowed: %r", exc)
         return None
+
+
+def generate_character_view(descriptor: str, style: str, view: str,
+                            reference: str | None = None,
+                            seed: int | None = None) -> str | None:
+    """ONE missing view of a character's reference set (the heal path). Returns the
+    image url or None; failures are swallowed like every other render."""
+    if not settings.IMAGE_ENABLED or not descriptor.strip():
+        return None
+    try:
+        with _render_gate():
+            return _provider().character_view(descriptor, style, view,
+                                              reference=reference, seed=seed)
+    except Exception as exc:
+        logging.getLogger("gamentic.image").warning("character_view(%s) swallowed: %r", view, exc)
+        return None
+
+
+# ---------- data-URI delivery (the Anna iframe cannot fetch /media over HTTP; it
+# pulls each image ONCE through GET /media64/{gid}/{name} and caches it browser-side.
+# This replaced the executa inlining every /media ref into every reply, which
+# re-encoded and re-shipped megabytes of base64 on each /state poll.) ----------
+
+_DATA_URI_MAX_PX = 768     # display size; the stdio writer spills >512KB frames to a file
+_DATA_URI_QUALITY = 78
+_data_uri_cache: dict[str, tuple[float, str]] = {}   # path -> (mtime, uri)
+_data_uri_lock = threading.Lock()
+
+
+def image_data_uri(path: str) -> str | None:
+    """A downscaled JPEG data: URI for one persisted image file, cached by mtime so
+    repeat requests never re-encode. None when the file is unreadable."""
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    with _data_uri_lock:
+        hit = _data_uri_cache.get(path)
+        if hit and hit[0] == mtime:
+            return hit[1]
+    try:
+        from PIL import Image
+        im = Image.open(path)
+        if im.mode not in ("RGB", "L"):
+            im = im.convert("RGB")
+        im.thumbnail((_DATA_URI_MAX_PX, _DATA_URI_MAX_PX))
+        buf = io.BytesIO()
+        im.save(buf, "JPEG", quality=_DATA_URI_QUALITY)
+        uri = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as exc:
+        logging.getLogger("gamentic.image").warning("data-uri encode failed for %s: %r", path, exc)
+        return None
+    with _data_uri_lock:
+        if len(_data_uri_cache) >= 256:     # a full game set is way under this
+            _data_uri_cache.clear()
+        _data_uri_cache[path] = (mtime, uri)
+    return uri
 
 
 def fetch_image_bytes(url: str | None) -> bytes | None:
@@ -186,16 +273,19 @@ def fetch_image_bytes(url: str | None) -> bytes | None:
 
 def generate_scene_image(prompt: str, seed: int | None = None,
                          width: int | None = None, height: int | None = None,
-                         references: list[str] | None = None) -> dict | None:
+                         references: list[str] | None = None,
+                         interactive: bool = False) -> dict | None:
     """Returns {image_url, ...} or None. Optional; off the turn hot-path by default.
     width/height override the scene defaults (the 'See' snapshot uses a landscape frame).
     references are fetchable image URLs (characters' stored views): providers that
     support them condition the render so existing characters keep their identity;
-    providers that don't silently fall back to plain t2i."""
+    providers that don't silently fall back to plain t2i. interactive=True takes the
+    player-facing lane (a look/show_image the player is watching for) so it never
+    waits behind the ambient render backlog on the Anna path."""
     if not settings.IMAGE_ENABLED or not prompt.strip():
         return None
     try:
-        with _RENDER_GATE:
+        with _render_gate(interactive):
             return _provider().generate(
                 prompt, (width or settings.IMAGE_SCENE_W, height or settings.IMAGE_SCENE_H),
                 seed=seed, references=references)

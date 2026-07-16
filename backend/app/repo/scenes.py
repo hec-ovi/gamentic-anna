@@ -150,7 +150,10 @@ def set_location(conn, gid: str, location: str) -> None:
         if dest_existing is not None and dest_existing["left_at_minutes"] is not None:
             ago = clock.elapsed_text(now - dest_existing["left_at_minutes"])
             then = clock.time_at(dest_existing["left_at_minutes"])["label"]
-            note = f"The player was last here {ago} ago ({then})."
+            # name the scene: two returning-moves on back-to-back turns can otherwise
+            # produce IDENTICAL note strings (same elapsed text, same clock label), and
+            # the end-of-turn expiry compares by value to spare a freshly-set note
+            note = f"The player was last here ({location}) {ago} ago ({then})."
             draft = (dest_existing["draft"] or "").strip()
             if draft:
                 note += f" Note from then: {draft}"
@@ -225,8 +228,9 @@ def absorb_scene_item_into_character(conn, gid: str, char_name: str) -> bool:
     """A spawned character ABSORBS their scene-item ghost: the narrator often authors a
     person as scenery first ('a sleeping camel driver' placed as an item), then spawns
     them when they wake; without this the same man stands in the scene twice, once as an
-    item card and once as a character card (live replay 2026-06-11). Token-subset match
-    on item_key, either direction ('camel driver' against 'a sleeping camel driver')."""
+    item card and once as a character card (live replay 2026-06-11). Match on item_key
+    tokens: the item's tokens inside the character name, or a 2+ token overlap
+    ('camel driver' against 'a sleeping camel driver')."""
     sc = current_scene(conn, gid)
     scene_items = db.loads(sc["items"], [])
     want = set(items.item_key(char_name).split())
@@ -234,7 +238,13 @@ def absorb_scene_item_into_character(conn, gid: str, char_name: str) -> bool:
         return False
     for it in scene_items:
         have = set(items.item_key(it["name"]).split())
-        if have and (want <= have or have <= want):
+        if not have:
+            continue
+        # item-tokens-inside-character-name ('camel driver' ghost <- character 'a
+        # sleeping camel driver') or a 2+ token overlap. The old either-direction
+        # single-token subset let a spawn named 'Guard' swallow the scene's 'guard
+        # dog' loot - a real object, not a person ghost.
+        if have <= want or len(want & have) >= 2:
             scene_items.remove(it)
             _save_items(conn, sc["id"], scene_items)
             return True

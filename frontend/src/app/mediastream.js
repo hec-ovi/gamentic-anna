@@ -143,7 +143,11 @@ export async function pullBeats(g) {
     return;
   }
   try {
-    const res = await api.getBeats(g.id, g.lastTurnIndex);
+    // since is EXCLUSIVE (turn_index > since) and a background render can land its
+    // image beat AT a turn_index we already fetched (its next_turn_index read raced
+    // the turn that owned it) - poll one turn behind and let the id seen-set dedupe,
+    // else that image never reaches the transcript until a full reload
+    const res = await api.getBeats(g.id, Math.max(0, g.lastTurnIndex - 1));
     if (state.active !== g || g.generating) return;
     const seen = new Set(g.beats.map((b) => b.id));
     const fresh = mapBeats((res && res.beats) || [])

@@ -32,6 +32,9 @@ _SIDE_VIEW = ("full body shot of {d}, standing, side profile view, whole figure 
               "visible head to feet, neutral plain background")
 _FACE_SIZE = (1024, 1024)
 _BODY_SIZE = (1024, 1536)
+_VIEW_SPECS = {"face": (_FACE_VIEW, _FACE_SIZE),
+               "front": (_FRONT_VIEW, _BODY_SIZE),
+               "side": (_SIDE_VIEW, _BODY_SIZE)}
 
 
 def _ref_bytes(ref: str) -> bytes | None:
@@ -88,6 +91,18 @@ class ImageProvider:
                 "body_front_url": (front or {}).get("image_url"),
                 "body_side_url": (side or {}).get("image_url"),
                 "seed": seed}
+
+    def character_view(self, descriptor: str, style: str = "", view: str = "face",
+                       reference: str | None = None, seed: int | None = None) -> str | None:
+        """ONE view of the reference set. The heal path renders only the views a
+        character is missing (the old full-set re-render every turn while one view
+        kept failing was the render loop). Conditioned on the face reference when
+        given and supported; otherwise plain t2i (identity softens, nothing breaks)."""
+        tpl, size = _VIEW_SPECS[view]
+        styled = f"{descriptor}. {style}".strip(". ") if style else descriptor
+        out = self.generate(tpl.format(d=styled), size, seed=seed,
+                            references=[reference] if reference else None)
+        return (out or {}).get("image_url")
 
 
 class ComfyProvider(ImageProvider):

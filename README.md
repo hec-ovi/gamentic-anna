@@ -1,8 +1,8 @@
 # 🎲 Gamentic on Anna
 
-> ⚠️ **The 65s invoke cap (read this first).** Anna's dev runtime caps every tool call at ~65 seconds and restarts the executa if one runs longer. A single image render takes 35-90s, which blows that window, so **image generation ships disabled** (`IMAGE_ENABLED=false`): with it on, creating or re-entering an adventure can time out and crash the executa. Everything else (narration, dialogue, characters, whispers, inventory, scene changes, quests) runs comfortably under the cap and is stable. Flip `IMAGE_ENABLED=true` once Anna raises the per-invoke cap.
+Describe a world in one sentence, then **play it** turn by turn: a live narrator, characters you talk and whisper to, an inventory you loot and gift, scene changes, new characters on the fly, quests, and generated art (scenes, portraits, item cards, look shots). It runs **natively as an Anna App**, with no GPU, no third-party bridge, and no bundled model: the engine reverse-RPCs Anna's own host for every token and every image.
 
-Describe a world in one sentence, then **play it** turn by turn: a live narrator, characters you talk and whisper to, an inventory you loot and gift, scene changes, new characters on the fly, and quests. It runs **natively as an Anna App**, with no GPU, no third-party bridge, and no bundled model: the engine reverse-RPCs Anna's own host for every token.
+> 🖼️ **How images stay off the hot path.** A render takes 35-90s, so none ever runs inside a tool invoke (the manifest raises the per-invoke timeout to 600s, and renders run detached anyway). They render up to two at a time, player-triggered looks get their own lane, an in-flight claim registry stops the self-heal from rendering the same asset twice, and a failing asset stops retrying after `IMAGE_HEAL_MAX_ATTEMPTS` passes. The iframe pulls each finished image once through `GET /media64` (a cached data URI) instead of every reply re-shipping base64.
 
 ## 📸 Screenshots
 
@@ -23,7 +23,7 @@ Then three steps, in order:
 Open **More**, go to the **App Store**, find **gamentic-anna**, and hit **Install**.
 
 #### 🔑 2. Let it use the model
-Open **More**, then **Advanced**, then **Executas**, then **Learned**. Pick **Gamentic**, open its **Permissions**, and switch **LLM Sampling** on.
+Open **More**, then **Advanced**, then **Executas**, then **Learned**. Pick **Gamentic**, open its **Permissions**, and switch **LLM Sampling** on. Art needs its own grants in the same panel: switch the image-generation and file-upload permissions on too (uploads carry the identity references that keep characters consistent across renders).
 
 #### 🚀 3. Bring the engine online
 Open **More**, then **Agents**. On your Agent, click **Install Essentials**. Open **Details** and wait until **Gamentic** reads **Running**.
@@ -42,7 +42,7 @@ Anna AI-Native App Hackathon. A working app running on Anna today: an Anna **App
 |---|---|
 | **What** | A complete AI dungeon master: describe a world, then play a text RPG with a narrator and characters that remember you. |
 | **Who it's for** | Anyone on Anna who wants a rich, replayable AI RPG (one sentence in, a world out). For builders: a clean pattern for running a full FastAPI app natively on Anna. |
-| **How AI is used** | The narrator, every character (each its own agent with private memory), the world-creator, and the free-text interpreter are all Anna-host LLM calls. Image generation is wired the same way (Anna's `image/generate`) but disabled by default, see the cap note above. |
+| **How AI is used** | The narrator, every character (each its own agent with private memory), the world-creator, and the free-text interpreter are all Anna-host LLM calls. Image generation goes the same way (Anna's `image/generate`), with identity references uploaded via `host/uploadFile`. |
 | **How it connects to Anna** | The UI is an Anna iframe; the engine is an Executa it calls over `anna.tools.invoke`. The Executa reverse-RPCs the host for `sampling/createMessage` (text) and `image/generate` (images). Anna owns the model, billing and quota. |
 
 ## ✨ What works (live, inside the Anna iframe)
@@ -55,20 +55,19 @@ Anna AI-Native App Hackathon. A working app running on Anna today: an Anna **App
 | 🎒 **Inventory** | Take items from a scene, give items to characters; deterministic, model-independent. |
 | 🚪 **World** | Scene transitions, new characters spawned on the fly, exits revealed as you explore. |
 | 🧠 **Memory** | Each character keeps a private rolling memory; the story keeps a recap, so context stays bounded. |
-| 🖼️ **Art** *(wired, off by default)* | Scene images, portraits and item cards via Anna's image host. Off because one render exceeds the 65s invoke cap (above); set `IMAGE_ENABLED=true` to try. |
+| 🖼️ **Art** | Scene images, character portraits (3-view reference sets), item unlock cards and look shots via Anna's image host, rendered in the background and slotted in as they land. |
 
 **Why it's robust:** the core mechanics (movement, take, give, dialogue cueing, world seeding) are **deterministic engine-side**, so gameplay holds up even on models that won't reliably emit tool calls. The model writes the prose and dialogue; the rules (what's possible, what each action does) are enforced in code.
 
 ### What's trimmed on Anna (and why)
 
-To keep every turn inside the 65s invoke cap and avoid dead affordances, the Anna build hides a few things the engine still supports:
+The Anna build hides what cannot pay off there:
 
 | Trimmed | Why |
 |---|---|
-| 🔍 **Look / Search** | A look turn's only real payoff was the scene render, and images ship off. Disabled in the composer, the scene action bar and the character panel. |
+| 🔍 **Look / Search** | Follow the images switch: a look turn's payoff is the render, so the composer mode, the scene action bar and the character panel only offer them while `IMAGE_ENABLED` is on. |
 | 🔊 **Voice / speaker icon** | Anna has no host TTS, so the per-line speak button would never play. Hidden in Anna mode. |
-| 🖼️ **Image area** | With no portrait to fill it, the tall character card collapses to a compact plate instead of a big empty box. |
-| 🎁 **Give** | Handing an item to a character now closes the popups and drops you back on the main screen, rather than opening their whisper thread. |
+| 🎁 **Give** | Handing an item to a character closes the popups and drops you back on the main screen, rather than opening their whisper thread. |
 
 Resume is resilient to the harness recycling the executa: idempotent reads (state, beats, library) retry a few times before surfacing an error, so re-opening an adventure no longer bounces you to the menu when the executa cycles mid-open.
 
@@ -96,8 +95,9 @@ Resume is resilient to the harness recycling the executa: idempotent reads (stat
 Top to bottom is the call path: the iframe UI invokes the Executa, which runs the engine in-process, which reverse-RPCs the Anna host for every token (and image). One container; the original Gamentic engine and UI are kept intact, only the comms layers swap to Anna's own.
 
 - **Backend** (`backend/app/executa.py`): the FastAPI engine wrapped as a stdio Executa. Each invoke replays an HTTP-style call against the in-process app (httpx ASGI transport), so every route, its validation and its behavior are exactly what uvicorn serves.
-- **Reverse-RPC** (`backend/app/hostbridge.py`): for text and images the engine calls the Anna host directly (`sampling/createMessage`, `image/generate`) via the vendored `executa_sdk`, with bounded retries on transient gateway errors.
-- **Non-blocking jobs** (`backend/app/main.py`): renders, summary folds and origin enrichment run on a detached pool, never on the request thread, so a slow job can't trip the 65s invoke cap; the frontend polls `/state` to pick up results.
+- **Reverse-RPC** (`backend/app/hostbridge.py`): for text, images and reference uploads the engine calls the Anna host directly (`sampling/createMessage`, `image/generate`, `host/uploadFile`) via the vendored `executa_sdk`, with bounded retries on transient gateway errors.
+- **Non-blocking jobs** (`backend/app/main.py`, `backend/app/integrate/jobs.py`): renders, summary folds and origin enrichment run on a detached pool, never on the request thread. Renders take two lanes (ambient width `IMAGE_CONCURRENCY`, player looks on their own), an in-flight claim registry keeps the per-turn self-heal from double-rendering, and per-asset attempt ceilings stop a failing render from retrying forever. The frontend polls `/state` and `/beats` to pick up results.
+- **Media delivery**: every image persists under `/media/<game>/` and replies carry only that small ref; the sandboxed iframe resolves each ref once through `GET /media64/{gid}/{name}` (a downscaled data URI, mtime-cached server-side, cached in a Map browser-side).
 - **Tool calls** (`backend/app/llm.py`): Anna sampling has no OpenAI-style function calling but does structured JSON, so the engine asks for a `{prose, tool_calls}` envelope and parses it back with a tolerant local repair (no network round-trip).
 - **Frontend** (`frontend/src/app/anna.js`): the UI runs in Anna's sandboxed iframe and routes through the injected transport; standalone dev falls back to `fetch`.
 - **Storage**: embedded SQLite on a Docker volume. Voice is off (Anna has no TTS).
@@ -133,7 +133,7 @@ docker-compose.yml
 
 ## 🧪 Tests
 
-**572 backend + 237 frontend tests pass.**
+**600 backend + 247 frontend tests pass.**
 
 ```sh
 # frontend (vitest + Testing Library, msw, jsdom)
@@ -148,7 +148,7 @@ cd backend && uv venv && uv pip install -e . pytest && .venv/bin/python -m pytes
 
 ## 📝 Notes
 
-- **The 65s invoke cap is the headline constraint.** It bounds image generation (off by default) and is why post-response jobs run detached. Watch for it if you re-enable images or add slow per-turn work.
+- **Keep slow work off the invoke.** The manifest raises the per-invoke timeout to 600s, but the reverse-RPC token dies about 600s after its invoke too, so anything slow (renders above all) runs detached and concurrently; the per-turn self-heal picks up whatever a dead token dropped.
 - **Token budget:** Anna's executa-side sampling makes `max_tokens` mandatory and caps it at 8192; the engine always passes the maximum and shapes length through the prompt, never a truncating ceiling.
-- **Images (when enabled):** generated images come back as short-lived host URLs; the engine persists each per game, then the Executa inlines it to the iframe as a data URI (the sandboxed iframe cannot fetch arbitrary URLs).
+- **Images:** generated images come back as short-lived host URLs; the engine persists each per game under `/media`, and the iframe pulls each one once via `GET /media64` (see Architecture). Identity references (a character's stored view) upload to the host via `host/uploadFile` because the host can only fetch references over HTTPS.
 - **Publishing:** the Executa is published to Anna's Executa Hub and referenced by `tool_id`; on Install Essentials the user's Agent runs `uv tool install <package>==<version>` from **PyPI** (`backend/pyproject.toml` builds the wheel; one `py3-none-any` artifact plus uv-resolved dependency wheels cover every platform). A wheel URL does not work here because the Agent always appends `==<version>`, which only a package name (not a URL) resolves. This repo is the dev/run setup for that app.

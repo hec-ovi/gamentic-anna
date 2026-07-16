@@ -45,12 +45,21 @@ WORLD = {
 }
 
 
-def _env(tmp):
-    return dict(os.environ,
+def _env(tmp, **overrides):
+    base = dict(os.environ,
                 ANNA="true", IMAGE_ENABLED="false", VOICE_ENABLED="false",
                 SUMMARY_ENABLED="false", CHAR_SUMMARY_ENABLED="false",
                 DB_PATH=os.path.join(tmp, "native.db"),
                 GAMES_DATA_DIR=os.path.join(tmp, "games"))
+    base.update(overrides)
+    return base
+
+
+# A real 1x1 PNG: the mock host answers image/generate with this as a data: URL, so
+# the engine's persist path (fetch_image_bytes decodes data: without network) writes
+# an actual PNG the /media64 encoder can open. Hermetic: no CDN, no sockets.
+TINY_PNG_URI = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+                "AAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")
 
 
 class MockHost:
@@ -59,9 +68,9 @@ class MockHost:
     envelopes) and per-character replies (a FIFO), branching like the in-process
     FakeLLM but at the sampling-envelope level."""
 
-    def __init__(self, tmp):
+    def __init__(self, tmp, **env_overrides):
         self.proc = subprocess.Popen(
-            [sys.executable, "-m", "app.executa"], cwd=BACKEND, env=_env(tmp),
+            [sys.executable, "-m", "app.executa"], cwd=BACKEND, env=_env(tmp, **env_overrides),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, bufsize=1)
         self.pending = {}
@@ -69,6 +78,7 @@ class MockHost:
         self.narrator_script = []           # queue of {"prose":..,"tool_calls":[..]} dicts
         self.character_replies = []          # FIFO of plain strings
         self.sample_calls = 0
+        self.image_calls = 0
         threading.Thread(target=self._read, daemon=True).start()
 
     # -- stdio --
@@ -89,8 +99,9 @@ class MockHost:
             if method == "sampling/createMessage":
                 self._answer_sampling(msg)
             elif method in ("image/generate", "image/edit"):
+                self.image_calls += 1
                 self._send({"jsonrpc": "2.0", "id": msg["id"], "result": {
-                    "images": [{"url": "https://mock.cdn/x.png", "mimeType": "image/png"}]}})
+                    "images": [{"url": TINY_PNG_URI, "mimeType": "image/png"}]}})
             elif not method:                 # a response to one of MY requests
                 with self.lock:
                     self.pending[msg.get("id")] = msg
@@ -178,7 +189,7 @@ def test_native_full_adventure(host):
     # The reverse-RPC whitelist for the app-bundled run: llm.sample (text) + llm.agent.auto
     # (host auto-mints the per-invoke sampling token via the app session, fixing -32001).
     # This is the manifest the live app uses; images are disabled in the app build.
-    assert man["host_capabilities"] == ["llm.sample", "llm.agent.auto"]
+    assert man["host_capabilities"] == ["llm.sample", "llm.agent.auto", "llm.image", "host.upload"]
     assert [t["name"] for t in man["tools"]] == ["request"]
     assert man["version"] == "0.2.8"            # synced: serverInfo + describe + pyproject + executa.json + app
 
@@ -262,3 +273,54 @@ def test_native_engine_404_rides_in_data(host):
     host.call(1, "initialize", {"protocolVersion": "2.0"})
     data = host.invoke("/games/nope/state")
     assert data["status"] == 404            # the engine's own 404, carried, not a transport error
+
+
+# ---------------------------------------------------------------------------
+# native image pipeline: renders reverse-RPC the host, persist to /media, and
+# replies carry the small /media refs (the iframe pulls each once via /media64)
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def host_images(tmp_path):
+    h = MockHost(str(tmp_path), IMAGE_ENABLED="true")
+    try:
+        yield h
+    finally:
+        h.close()
+
+
+def test_native_image_pipeline_media_refs_and_media64(host_images):
+    host = host_images
+    host.call(1, "initialize", {"protocolVersion": "2.0"})
+    created = host.invoke("/games", "POST", WORLD)
+    gid = created["json"]["game_id"]
+
+    # creation art runs DETACHED (the invoke returned already); poll /state like the
+    # frontend does until the portraits and the opening scene image land
+    state = None
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        state = host.invoke(f"/games/{gid}/state")["json"]
+        chars = state.get("characters") or []
+        if state.get("scene", {}).get("image_url") and chars and chars[0].get("face_url"):
+            break
+        time.sleep(0.25)
+
+    scene_url = state["scene"]["image_url"]
+    face_url = state["characters"][0]["face_url"]
+    # replies carry the raw /media refs - never inlined base64 (the old inlining
+    # re-encoded and re-shipped every image on every /state poll)
+    assert scene_url and scene_url.startswith(f"/media/{gid}/"), state["scene"]
+    assert face_url and face_url.startswith(f"/media/{gid}/char-"), state["characters"][0]
+    assert "data:" not in json.dumps(state)
+    assert host.image_calls >= 4            # 3 character views + the scene render
+
+    # the iframe's one-time pull: /media64 turns the ref into a data: URI
+    got = host.invoke("/media64" + face_url[len("/media"):])
+    assert got["status"] == 200, got
+    assert got["json"]["uri"].startswith("data:image/jpeg;base64,")
+
+    # and a second beat-level check: the story's image beats (if any land later)
+    # plus a missing file 404s cleanly through the same transport
+    missing = host.invoke(f"/media64/{gid}/never-was.png")
+    assert missing["status"] == 404

@@ -97,9 +97,11 @@ export function renderPlayDeck(s, locked, g = {}) {
   const desc = (scene && scene.description) || "";
   const mood = (scene && scene.status) || s.sceneStatus || null;
   const items = (scene && scene.items) || [];
-  // Look/Search are disabled: they map to a "look" turn whose only real payoff was
-  // the scene render, and images ship off (the 65s invoke cap). Drop them from the bar.
-  const actions = ((scene && scene.actions) || []).filter((a) => a.type !== "look" && a.type !== "search");
+  // Look/Search follow the images switch: a "look" turn's real payoff is the scene
+  // render, so the offers only show when the backend can actually deliver one
+  // (images_enabled rides in /state; with images off they stay trimmed).
+  const actions = ((scene && scene.actions) || []).filter(
+    (a) => s.imagesEnabled || (a.type !== "look" && a.type !== "search"));
   const exits = (scene && scene.exits) || [];
   void g;
 
@@ -268,10 +270,12 @@ export function renderActionBar(g, s, locked) {
           id: "cmp",
           mode: cmp.mode,
           locked,
-          modes: ["do", "say"],
+          // Look is offered only when images are on (its payoff is the render)
+          modes: s.imagesEnabled ? ["do", "say", "look"] : ["do", "say"],
           placeholders: {
             do: "Do or say anything... (Enter sends)",
             say: "What do you say?",
+            look: "Look at what? (empty = the whole scene)",
           },
           submitLabel: "Send",
         })}

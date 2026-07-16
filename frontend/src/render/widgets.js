@@ -1,5 +1,6 @@
 // Shared widgets: the context meter, fixed-slot grids, the composer + stack.
 
+import { resolveMediaUrl } from "../app/mediacache.js";
 import { describeSegment } from "../composer.js";
 import { icon } from "../icons.js";
 import { cardCorners, escapeHtml, initials } from "./common.js";
@@ -50,8 +51,11 @@ export function slotGrid(items, total, cls, cellFn = filledSlot) {
 }
 
 export function slotInner(it) {
-  return it.imageUrl
-    ? `<img src="${escapeHtml(it.imageUrl)}" alt="${escapeHtml(it.name)}" loading="lazy" />`
+  // under Anna the /media ref resolves through the media cache; while it loads
+  // (or if it never can) the slot keeps its initials, exactly like no-image
+  const src = resolveMediaUrl(it.imageUrl);
+  return src
+    ? `<img src="${escapeHtml(src)}" alt="${escapeHtml(it.name)}" loading="lazy" />`
     : `<span class="slot-abbr">${escapeHtml(initials(it.name))}</span>`;
 }
 
@@ -208,10 +212,18 @@ export function dispositionBadges(c) {
 // A lightbox-trigger image: data-art arms the global lightbox listener and the
 // card-reveal, data-caption is what shows when it expands, loading=lazy keeps
 // the strip cheap. Every art image goes through here so none of those drift.
+// data-art keeps the STABLE /media ref (reveal-once identity) while src is the
+// resolved value; under Anna an unresolved ref renders the developing-photo
+// skeleton until the media cache lands it.
 export function artImg({ url, alt = "", caption, cls = "" }) {
+  const src = resolveMediaUrl(url);
+  if (!src) {
+    return artLoading(`art-fetch${cls ? ` ${cls}` : ""}`, "visual manifesting...",
+      alt || "Image is loading", "span");
+  }
   const clsAttr = cls ? ` class="${cls}"` : "";
   const cap = caption ? ` data-caption="${escapeHtml(caption)}"` : "";
-  return `<img${clsAttr} data-art="${escapeHtml(url)}" src="${escapeHtml(url)}" alt="${escapeHtml(alt)}"${cap} loading="lazy" />`;
+  return `<img${clsAttr} data-art="${escapeHtml(url)}" src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${cap} loading="lazy" />`;
 }
 
 // The staged-reveal wrapper: a beat queued for the typewriter reveal renders
@@ -221,11 +233,13 @@ export function veilWrap(html, veiled) {
 }
 
 // img-or-initials: the small portrait used in the cast roster and dialogue
-// bubbles. A real face when we have one, else the initials on a color plate.
+// bubbles. A real face when we have one, else the initials on a color plate
+// (also shown while the Anna media cache is still fetching the face).
 // (col-art / profile-art are a different shape and stay hand-built.)
 export function avatarOrInitials({ url, name, color, imgCls = "", fallbackCls }) {
-  return url
-    ? `<img${imgCls ? ` class="${imgCls}"` : ""} src="${escapeHtml(url)}" alt="${escapeHtml(name)}" loading="lazy" />`
+  const src = resolveMediaUrl(url);
+  return src
+    ? `<img${imgCls ? ` class="${imgCls}"` : ""} src="${escapeHtml(src)}" alt="${escapeHtml(name)}" loading="lazy" />`
     : `<span class="${fallbackCls}" style="background:${escapeHtml(color)}">${escapeHtml(initials(name))}</span>`;
 }
 

@@ -19,11 +19,8 @@ Wire shape (Anna Executa protocol v2):
    awaiting sampling/image client.)
 """
 import asyncio
-import base64
-import io
 import json
 import logging
-import os
 import sys
 import threading
 import traceback
@@ -31,11 +28,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
-from executa_sdk import ImageClient, PROTOCOL_VERSION_V1, PROTOCOL_VERSION_V2, SamplingClient
+from executa_sdk import HostUploadClient, ImageClient, PROTOCOL_VERSION_V1, PROTOCOL_VERSION_V2, SamplingClient
 from executa_sdk.sampling import _write_frame as _sdk_write_frame
 
 from . import db, hostbridge
-from .config import settings
 from .main import app
 
 TOOL_ID = "tool-dev-gamentic"          # dev placeholder; the real id is server-minted at publish
@@ -71,12 +67,15 @@ MANIFEST = {
             ],
         }
     ],
-    # Reverse host-capabilities the engine uses: host LLM sampling (text). llm.agent.auto
-    # lets the host mint the per-invoke sampling token via an app session - the auth chain
-    # for an app-bundled executa run by the Anna agent (app host_api.agent.session.auto ->
-    # sampling token), which is what fixes the -32001 "sampling token missing". Matches the
-    # anna-app-llm-demo example. Without llm.sample declared, sampling is -32008 NOT_NEGOTIATED.
-    "host_capabilities": ["llm.sample", "llm.agent.auto"],
+    # Reverse host-capabilities the engine uses: host LLM sampling (text), image
+    # generation, and reference-image uploads. llm.agent.auto lets the host mint the
+    # per-invoke sampling token via an app session - the auth chain for an app-bundled
+    # executa run by the Anna agent (app host_api.agent.session.auto -> sampling token),
+    # which is what fixes the -32001 "sampling token missing". Matches the
+    # anna-app-llm-demo example. Without llm.sample declared, sampling is -32008
+    # NOT_NEGOTIATED; llm.image and host.upload cover image/generate (-32107 otherwise)
+    # and host/uploadFile (identity references ride transient hosted URLs).
+    "host_capabilities": ["llm.sample", "llm.agent.auto", "llm.image", "host.upload"],
     "runtime": {"type": "uv", "min_version": "0.1.0"},
 }
 
@@ -98,51 +97,14 @@ def _write_frame(msg: dict) -> None:
         _sdk_write_frame(msg)
 
 
-# --- media delivery: inline /media images as downscaled data: URIs -----------------
-# The engine persists every generated image (whatever the provider) to disk under
-# /media/<gid>/<file> and stores that ref on beats; the sandboxed iframe cannot fetch
-# /media, so on the way out we replace those refs with small data: URIs (CSP allows
-# data:). Bounded to stay under the stdio frame cap; over budget, refs are left as-is.
-_MEDIA_PREFIX = "/media/"
-_INLINE_BUDGET = 1_400_000   # max total data:-URI chars per reply (under the frame cap)
-
-
-def _media_path(url: str) -> str | None:
-    rest = url[len(_MEDIA_PREFIX):]
-    gid, _, name = rest.partition("/")
-    if not gid or not name or "/" in name or ".." in name:
-        return None
-    return os.path.join(settings.GAMES_DATA_DIR, gid, "images", name)
-
-
-def _data_uri(fp: str, max_px: int = 512, quality: int = 72) -> str | None:
-    try:
-        from PIL import Image
-        im = Image.open(fp)
-        if im.mode not in ("RGB", "L"):
-            im = im.convert("RGB")
-        im.thumbnail((max_px, max_px))
-        buf = io.BytesIO()
-        im.save(buf, "JPEG", quality=quality)
-        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception as exc:
-        _log("inline-media failed for", fp, repr(exc))
-        return None
-
-
-def _inline_media(obj, budget: list[int]):
-    if isinstance(obj, dict):
-        return {k: _inline_media(v, budget) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_inline_media(v, budget) for v in obj]
-    if isinstance(obj, str) and obj.startswith(_MEDIA_PREFIX) and budget[0] > 0:
-        fp = _media_path(obj)
-        if fp and os.path.isfile(fp):
-            uri = _data_uri(fp)
-            if uri and len(uri) <= budget[0]:
-                budget[0] -= len(uri)
-                return uri
-    return obj
+# --- media delivery ------------------------------------------------------------------
+# The engine persists every generated image to disk under /media/<gid>/<file> and
+# stores that ref on beats/state. The sandboxed iframe cannot fetch /media over HTTP,
+# so it resolves each ref ONCE through GET /media64/{gid}/{name} (a data: URI, encoded
+# and mtime-cached in app.media) and caches it browser-side. Replies here carry only
+# the small /media refs. (The old approach - rewriting every ref into a data: URI in
+# every reply - re-encoded with PIL on the event loop and re-shipped up to 1.4MB of
+# base64 per /state poll, and refs past the budget arrived unfetchable.)
 
 
 # --- one shared asyncio loop (its own thread): hosts the ASGI client AND the reverse
@@ -154,6 +116,7 @@ threading.Thread(target=_loop.run_forever, daemon=True, name="executa-loop").sta
 
 _sampling = SamplingClient(write_frame=_write_frame)
 _image = ImageClient(write_frame=_write_frame)
+_upload = HostUploadClient(write_frame=_write_frame)
 
 _client: httpx.AsyncClient | None = None
 
@@ -183,13 +146,15 @@ def _warm() -> None:
     # which the dev harness surfaces) so detached job errors and engine logs are visible.
     logging.basicConfig(level=logging.INFO, stream=sys.stderr)
     _ensure_client()
-    hostbridge.set_channel(hostbridge.HostChannel(loop=_loop, sampling=_sampling, image=_image))
+    hostbridge.set_channel(hostbridge.HostChannel(loop=_loop, sampling=_sampling,
+                                                  image=_image, upload=_upload))
 
 
 def _route_response(msg: dict) -> bool:
     """A frame with no `method` is a host reply to one of our reverse RPCs: hand it to
     whichever client is awaiting that id."""
-    return _sampling.dispatch_response(msg) or _image.dispatch_response(msg)
+    return (_sampling.dispatch_response(msg) or _image.dispatch_response(msg)
+            or _upload.dispatch_response(msg))
 
 
 async def _run_request(path: str, method: str, body, query) -> dict:
@@ -200,8 +165,6 @@ async def _run_request(path: str, method: str, body, query) -> dict:
         payload = resp.json()
     except Exception:
         payload = resp.text
-    if isinstance(payload, (dict, list)):
-        payload = _inline_media(payload, [_INLINE_BUDGET])
     return {"status": resp.status_code, "json": payload}
 
 
@@ -243,6 +206,7 @@ def handle(req: dict) -> dict:
                       "reverse RPC requires Executa protocol 2.0")
             _sampling.disable(reason)
             _image.disable(reason)
+            _upload.disable(reason)
         return {"result": {
             "protocolVersion": proto if proto in ("1.1", "2.0") else "2.0",
             "serverInfo": {"name": TOOL_ID, "version": VERSION},

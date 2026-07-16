@@ -141,6 +141,19 @@ class Settings:
     # are allowed only every N turns, so they stay a dramatic beat, not wallpaper.
     # A player look always renders if the narrator calls the tool.
     IMAGE_NARRATOR_COOLDOWN_TURNS = int(os.getenv("IMAGE_NARRATOR_COOLDOWN_TURNS", "4"))
+    # Ambient render lane width on the Anna host path ONLY (portraits / scene art /
+    # item cards). The Anna host takes concurrent image/generate calls (each is its own
+    # reverse-RPC future), and the per-invoke token dies ~600s after the invoke that
+    # minted it - a creation pass serialized at 35-90s per render blows that TTL, so
+    # width 2 is a correctness floor, not just a speed knob. The local comfy stack
+    # keeps its strict one-render-at-a-time lock regardless of this value.
+    IMAGE_CONCURRENCY = max(1, int(os.getenv("IMAGE_CONCURRENCY", "2")))
+    # Self-heal attempt ceiling PER ASSET (a character's set, one item card, one
+    # scene) for this process's life. The per-turn self-heal used to re-render a
+    # failing asset every single turn forever (the render loop); after this many
+    # failed passes it stops and the UI keeps its graceful fallback (initials /
+    # no card). An executa restart grants a fresh allowance.
+    IMAGE_HEAL_MAX_ATTEMPTS = max(1, int(os.getenv("IMAGE_HEAL_MAX_ATTEMPTS", "3")))
 
     # --- Voice integration (orchestrator -> voice-api, server to server) ---
     VOICE_API_URL = os.getenv("VOICE_API_URL", "http://localhost:9002")

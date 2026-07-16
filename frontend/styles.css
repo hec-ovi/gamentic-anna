@@ -80,6 +80,9 @@ button { font: inherit; cursor: pointer; }
   font-family: var(--font-prose); font-size: 1.18rem; line-height: 1.72;
   color: var(--ink-prose); margin: 0 0 1rem; letter-spacing: 0.005em;
   animation: rise 0.5s ease both;
+  /* the typewriter writes raw \n via textContent; pre-wrap keeps a verse's line
+     breaks during the reveal identical to the final <br /> markup */
+  white-space: pre-wrap;
 }
 .narration .speak-btn { position: absolute; top: 0; right: -0.5rem; }
 
@@ -920,6 +923,12 @@ button.slot.item-scenery:hover { border-color: var(--gold); box-shadow: 0 0 10px
   text-transform: uppercase; color: var(--ink-muted); animation: blink 2s infinite; }
 @keyframes art-shimmer { from { background-position: 120% 0; } to { background-position: -120% 0; } }
 @keyframes art-scanline { 0% { top: 4%; } 50% { top: 94%; } 100% { top: 4%; } }
+
+/* in-figure fetch skeleton (Anna: the image exists server-side and the media
+   cache is pulling it): fills the img's slot so the card keeps its shape */
+.art-fetch { display: block; width: 100%; aspect-ratio: 3 / 2; }
+.beat-image.item-card .art-fetch { aspect-ratio: 1 / 1; }
+.col-body.art-fetch, .profile-art.art-fetch { aspect-ratio: 2 / 3; }
 
 /* card-reveal: a new piece of art arrives like a collectible card being turned */
 .art-reveal { animation: art-reveal-k 1s cubic-bezier(0.2, 0.9, 0.25, 1) both; }

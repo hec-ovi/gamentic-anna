@@ -896,7 +896,9 @@ test("after a turn, the SSE beat event pulls the late images in", async () => {
       const since = new URL(request.url).searchParams.get("since");
       if (since === null)
         return HttpResponse.json({ beats: [makeBeat({ id: "open", turn_index: 1, text: "Rain hammers the window of The Last Breath." })] });
-      if (Number(since) >= 2 && imagesReady) {
+      // the app polls ONE turn behind its high-water mark (turn 2 -> since=1) so a
+      // same-turn late image beat is never lost to the exclusive since= query
+      if (Number(since) >= 1 && imagesReady) {
         return HttpResponse.json({
           beats: [
             makeBeat({ id: "li1", turn_index: 3, seq: 0, speaker: "narrator", kind: "image", text: "the whole scene", image_url: "/media/g-test/look1.png" }),

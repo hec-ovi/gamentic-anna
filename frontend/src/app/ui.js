@@ -205,16 +205,26 @@ function onRootSubmit(e) {
 }
 
 // Enter in a composer line = submit its form (the contenteditable line is
-// single-line; newlines have no meaning in a segment)
+// single-line; newlines have no meaning in a segment). Enter/Space on a
+// role=button [data-act] element (the scene-art figure) activates it - the
+// role contract promised keyboard operation the click delegation alone
+// never delivered.
 function onRootKeydown(e) {
-  if (e.key !== "Enter") return;
+  if (e.key !== "Enter" && e.key !== " ") return;
   const input = e.target.closest && e.target.closest(".composer-input");
-  if (!input) return;
+  if (input) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const form = input.closest("form");
+    if (!form) return;
+    if (typeof form.requestSubmit === "function") form.requestSubmit();
+    else form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    return;
+  }
+  const btn = e.target.closest && e.target.closest('[data-act][role="button"]');
+  if (!btn) return;
   e.preventDefault();
-  const form = input.closest("form");
-  if (!form) return;
-  if (typeof form.requestSubmit === "function") form.requestSubmit();
-  else form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+  if (btn.dataset.act !== "noop") onAction(btn.dataset.act, btn);
 }
 
 function onRootChange(e) {

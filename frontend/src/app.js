@@ -13,6 +13,7 @@ import { refreshLibrary } from "./app/game.js";
 import { stopMediaWatch } from "./app/mediastream.js";
 import { resetCreator } from "./app/creatorctl.js";
 import { maybeOpenLightbox, retryFailedImage } from "./app/media.js";
+import { onMediaReady } from "./app/mediacache.js";
 import { followStory } from "./app/reveal.js";
 import { connectAnna, inAnnaWindow } from "./app/anna.js";
 
@@ -42,6 +43,12 @@ export function init(opts = {}) {
   // their slots). Capture phase so it also works inside modal wrappers; images
   // inside action buttons (item slots) keep their own click meaning.
   root.addEventListener("click", maybeOpenLightbox, true);
+  // Anna media cache: when a fetched image lands, repaint so the skeleton /
+  // initials it was holding swap to the real art (batched; no-op outside Anna)
+  onMediaReady(() => {
+    if (state.active && state.active.revealing) return; // never yank a running typewriter
+    render();
+  });
   resetCreator();
   // In an Anna window, switch to Anna mode on the FIRST paint: render as the embedded
   // app (no Settings, compact) and SKIP the standalone HTTP library fetch - there is no

@@ -101,7 +101,7 @@ def test_installed_wheel_describes(installed_console):
     assert init["serverInfo"]["version"] == VERSION
     assert man["version"] == VERSION
     assert [t["name"] for t in man["tools"]] == ["request"]
-    assert man["host_capabilities"] == ["llm.sample", "llm.agent.auto"]
+    assert man["host_capabilities"] == ["llm.sample", "llm.agent.auto", "llm.image", "host.upload"]
 
 
 def test_installed_wheel_serves_engine_route(installed_console):

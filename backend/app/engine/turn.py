@@ -2,6 +2,7 @@
 deterministic adjudication pre-check, the narrator call, the bounded character cascade,
 the private channel, and the freeform-input interpreter."""
 import json
+import logging
 import re
 from collections import deque
 
@@ -212,6 +213,11 @@ def _match_take(texts, scene_items) -> str | None:
         text = _norm_move(raw)
         if not text:
             continue
+        # look-intent outranks take-intent even when an item is NAMED: "take a look at
+        # the sword" is inspection (the bare guard above only covered the item-less
+        # "take a look around", so the router silently pocketed the sword)
+        if re.search(r"(?<!\w)(take|have|get)\s+(?:(?:a|another)\s+)?(?:\w+\s+){0,2}look(?!\w)", text):
+            continue
         if not any(re.search(rf"(?<!\w){re.escape(v)}(?!\w)", text) for v in _TAKE_VERBS):
             continue
         for it in scene_items:
@@ -244,12 +250,20 @@ def _character_reply(conn, gid, ch, emit, private_with=None, impulse=None):
     for _ in range(2):
         # one retry: a character occasionally returns nothing usable (live: spoken to,
         # no reply), and a silent addressed character reads as a bug, not a choice
-        creply = llm.chat(
-            prompts.build_character_messages(conn, gid, ch, settings.CHAR_HISTORY_BEATS,
-                                             impulse=impulse),
-            tools=tools.CHARACTER_TOOLS, tool_choice="auto",
-            temperature=settings.CHARACTER_TEMPERATURE, max_tokens=settings.CHARACTER_MAX_TOKENS,
-        )
+        try:
+            creply = llm.chat(
+                prompts.build_character_messages(conn, gid, ch, settings.CHAR_HISTORY_BEATS,
+                                                 impulse=impulse),
+                tools=tools.CHARACTER_TOOLS, tool_choice="auto",
+                temperature=settings.CHARACTER_TEMPERATURE, max_tokens=settings.CHARACTER_MAX_TOKENS,
+            )
+        except Exception:
+            # a transient provider failure on a SECONDARY voice must never unwind the
+            # already-resolved turn (it rolled back the whole transaction and 500d);
+            # this character just stays quiet this turn
+            logging.getLogger("gamentic.turn").warning(
+                "character reply for %s swallowed a provider failure", ch["name"], exc_info=True)
+            return []
         tok = (creply.usage or {}).get("prompt_tokens", 0) or 0
         if tok:
             repo.set_character_context(conn, ch["id"], tok)
@@ -702,15 +716,22 @@ def run_turn(conn, gid: str, action_text: str = "", segments=None,
             # a short resolve pass voices the outcome so the turn is never dead air.
             will_speak = bool(cues) or bool(queue)
             if state_notes or not will_speak:
-                resolve = llm.chat(
-                    prompts.build_narrator_resolve_messages(conn, gid, narrator_action, state_notes),
-                    temperature=settings.NARRATOR_TEMPERATURE,
-                    max_tokens=settings.NARRATOR_RESOLVE_MAX_TOKENS,
-                    # same narrator voice, same defenses: the scaffold + impersonation
-                    # stops above (static review: a screenplay line passed this pass
-                    # verbatim because only the main call was stopped)
-                    stop=stops or None,
-                )
+                try:
+                    resolve = llm.chat(
+                        prompts.build_narrator_resolve_messages(conn, gid, narrator_action, state_notes),
+                        temperature=settings.NARRATOR_TEMPERATURE,
+                        max_tokens=settings.NARRATOR_RESOLVE_MAX_TOKENS,
+                        # same narrator voice, same defenses: the scaffold + impersonation
+                        # stops above (static review: a screenplay line passed this pass
+                        # verbatim because only the main call was stopped)
+                        stop=stops or None,
+                    )
+                except Exception:
+                    # the turn already resolved (state changed, receipts below); a failed
+                    # flourish pass must not roll all of that back and 500 the request
+                    logging.getLogger("gamentic.turn").warning(
+                        "resolve pass swallowed a provider failure", exc_info=True)
+                    resolve = llm.LLMReply(content="")
                 track["ctx"] = max(track["ctx"], (resolve.usage or {}).get("prompt_tokens", 0) or 0)
                 rprose = parsing.clean_prose(resolve.content)
                 if rprose and resolve.finish_reason == "length":
@@ -812,7 +833,12 @@ def run_turn(conn, gid: str, action_text: str = "", segments=None,
             _character_reply(conn, gid, row, emit, private_with=row["id"])
 
     if arrival_at_start:
-        repo.clear_arrival_note(conn, gid)
+        # expire ONLY the note we started with: a move THIS turn into another
+        # previously-left scene wrote a fresh note (live shape: returning-moves on
+        # back-to-back turns), and clearing blind would rob the NEXT narrator of it
+        now_note = (repo.get_game(conn, gid)["arrival_note"] or "").strip()
+        if now_note == arrival_at_start:
+            repo.clear_arrival_note(conn, gid)
     if track["ctx"]:
         repo.set_context_used(conn, gid, track["ctx"])
     # Death is ENGINE-owned: a turn that ends with the player at 0 life IS lost, no

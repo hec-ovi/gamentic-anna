@@ -83,6 +83,11 @@ def heal(conn, gid, args, actor):
             text += " You are back from the brink."
         return _result("state", text)
     if kind_t == "character":
+        if not row["alive"]:
+            # mirror apply_damage's dead-target bounce: kill_character is permanent, and
+            # set_character_life flips alive back on for any life > 0 - a stray heal was
+            # silently resurrecting the dead into the scene
+            return _invalid(f"heal: {row['name']} is beyond healing")
         new, _ = repo.set_character_life(conn, row["id"], amount)
         return _result("state", f"{row['name']} recovers {amount} ({new}).")
     return _invalid(f"heal: unknown target '{tname}'")

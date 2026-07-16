@@ -21,7 +21,9 @@ export function maybeOpenLightbox(e) {
   // sheet) outranks the raw lightbox; the sheet's image lightboxes from there
   if (e.target.closest && e.target.closest("figure[data-act]")) return;
   const src = img.getAttribute("src") || "";
-  if (!src.startsWith("/")) return; // only our same-origin game media
+  // our game media only: same-origin /media paths (HTTP mode) or the data: URIs
+  // the Anna media cache resolves them to (the iframe cannot fetch /media)
+  if (!src.startsWith("/") && !src.startsWith("data:")) return;
   e.preventDefault();
   e.stopPropagation();
   // prefer the rich description a renderer attached over the bare alt name

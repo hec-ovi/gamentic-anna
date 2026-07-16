@@ -125,6 +125,9 @@ export function createApi(backendUrl, { invoke = null } = {}) {
     characterProfile: (id, cid) =>
       request(`/games/${encodeURIComponent(id)}/characters/${encodeURIComponent(cid)}/profile`),
     exportGame: (id, kind) => request(`/games/${encodeURIComponent(id)}/export?kind=${encodeURIComponent(kind)}`),
+    // '/media/<gid>/<name>' -> { uri: 'data:image/jpeg;base64,...' } (Anna mode: the
+    // iframe cannot fetch /media directly; mediacache.js calls this once per image)
+    media64: (mediaUrl) => request(`/media64${String(mediaUrl).replace(/^\/media/, "")}`),
     importGame: (payload) => request("/games/import", { method: "POST", body: payload, timeout: IMPORT_TIMEOUT_MS }),
     deleteGame: (id) => request(`/games/${encodeURIComponent(id)}`, { method: "DELETE" }),
     wipeAll: () => request("/games?confirm=wipe", { method: "DELETE" }),

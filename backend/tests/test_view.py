@@ -26,7 +26,7 @@ def _enable(monkeypatch, tmp_path, captured):
     monkeypatch.setattr(settings, "GAMES_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(media, "generate_character_images", lambda descriptor, style="", seed=None: None)
 
-    def _gen(prompt, seed=None, width=None, height=None, references=None):
+    def _gen(prompt, seed=None, width=None, height=None, references=None, interactive=False):
         captured.update(prompt=prompt, width=width, height=height, references=references)
         return {"image_url": "/image/file?filename=v"}
     monkeypatch.setattr(media, "generate_scene_image", _gen)
@@ -225,7 +225,7 @@ def test_view_fails_soft_when_generation_is_down(client, fake_llm, monkeypatch, 
     captured = {}
     _enable(monkeypatch, tmp_path, captured)
     monkeypatch.setattr(media, "generate_scene_image",
-                        lambda prompt, seed=None, width=None, height=None, references=None: None)
+                        lambda prompt, seed=None, width=None, height=None, references=None, interactive=False: None)
     gid = client.post("/games", json=WORLD).json()["game_id"]
     r = client.post(f"/games/{gid}/view")
     assert r.status_code == 502                                     # explicit, FE can toast it

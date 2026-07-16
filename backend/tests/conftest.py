@@ -122,6 +122,18 @@ def fresh_db():
 
 
 @pytest.fixture(autouse=True)
+def fresh_job_registries():
+    """The render jobs keep process-global state (in-flight claims, per-asset heal
+    attempt meters, uploaded-reference cache). Each test starts clean so one test's
+    exhausted heal meter never mutes another's render."""
+    from app.integrate import jobs
+    jobs._inflight.clear()
+    jobs._heal_attempts.clear()
+    jobs._uploaded_refs.clear()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def inert_media_cleanup(monkeypatch):
     """The ownership-cleanup calls are DESTRUCTIVE against live services: the dev box
     usually has the real image-api/voice-api up on 9001/9002, and a wipe test that

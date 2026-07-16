@@ -44,7 +44,13 @@ def export_template(conn, gid: str) -> dict | None:
                         "description": c["description"] or "",
                         "knowledge": c["knowledge"] or "",
                         "appearance": c["appearance"] or "",
-                        "disposition": c["disposition"] or "neutral"}
+                        "disposition": c["disposition"] or "neutral",
+                        # world DESIGN, not progress: without these a shared cast lost
+                        # its authored backstories, its 'she is your sister' framing,
+                        # and could flip pronouns on re-inference at import
+                        "origin": c["origin"] or "",
+                        "relation": c["relation"] or "",
+                        "gender": c["gender"] or ""}
                        for c in repo.get_characters(conn, gid) if c["alive"]],
         "quests": [{"title": q["title"], "description": q["description"] or "",
                     "objectives": [o["text"] for o in repo.get_objectives(conn, q["id"])]}

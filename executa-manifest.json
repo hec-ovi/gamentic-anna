@@ -16,5 +16,5 @@
     }
   ],
   "credentials": [],
-  "host_capabilities": ["llm.sample", "llm.agent.auto"]
+  "host_capabilities": ["llm.sample", "llm.agent.auto", "llm.image", "host.upload"]
 }

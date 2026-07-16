@@ -70,6 +70,7 @@ class HostChannel:
     loop: Any        # the executa's asyncio event loop (running on its own thread)
     sampling: Any    # executa_sdk.SamplingClient
     image: Any       # executa_sdk.ImageClient
+    upload: Any = None   # executa_sdk.HostUploadClient (reference-image uploads)
 
 
 _channel: HostChannel | None = None
@@ -112,6 +113,23 @@ def sample_sync(
             on_unsupported=on_unsupported,
             timeout=timeout,
         )
+
+    return _call_with_retry(_make, ch.loop, result_timeout=timeout + 15)
+
+
+def upload_file_sync(*, filename: str, content: bytes, mime_type: str = "image/png",
+                     purpose: str = "image-edit-input", timeout: float = 60.0) -> dict:
+    """Blocking `host/uploadFile` (inline mode): push a local file to the host's R2
+    bucket and get a transient HTTPS URL back. This is how identity references reach
+    image/generate under Anna - the host can only fetch reference_image_urls over
+    HTTPS, never our /media paths (they live on the executa's own disk)."""
+    ch = _channel
+    if ch is None or ch.upload is None:
+        raise RuntimeError("no Anna host upload channel installed")
+
+    def _make():
+        return ch.upload.upload_inline(filename=filename, mime_type=mime_type,
+                                       content=content, purpose=purpose, timeout=timeout)
 
     return _call_with_retry(_make, ch.loop, result_timeout=timeout + 15)
 

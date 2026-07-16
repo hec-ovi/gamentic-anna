@@ -54,6 +54,10 @@ def add_item(conn, gid, args, actor):
 def remove_item(conn, gid, args, actor):
     nm = (args.get("name") or "").strip()
     qty = int(args.get("qty", 1) or 1)
+    if qty < 0:
+        # mirror add_item's guard (live: add_item(coins, qty=-3) once GAINED coins; the
+        # same trick here inflated the stack while printing a 'Lost:' receipt)
+        return _invalid(f"remove_item: negative qty {qty}")
     removed = repo.remove_item(conn, gid, nm, qty)
     if not removed:
         # near-miss net (live: remove_item('room key') against a pack holding 'heavy
@@ -106,7 +110,10 @@ def place_item(conn, gid, args, actor):
         res = repo.add_scene_item(conn, gid, nm, desc, hidden, settings.SCENE_INVENTORY_CAP, fixed)
         if res == "full":
             if pulled:
-                repo.add_item(conn, gid, pulled["name"], pulled.get("description", ""))
+                # the rollback restores the RECORD, image and stack included (a bare
+                # name+description re-add lost a qty-1 item's generated card for good)
+                repo.add_item(conn, gid, pulled["name"], pulled.get("description", ""),
+                              qty=pulled.get("qty", 1), image_url=pulled.get("image_url"))
             return _invalid(f"place_item: scene is full ({settings.SCENE_INVENTORY_CAP})")
         if res == "exists":
             return _result("state")  # already here, silent
@@ -121,7 +128,8 @@ def place_item(conn, gid, args, actor):
     res = repo.character_add_item(conn, row["id"], nm, desc, hidden, cap=settings.CHAR_INVENTORY_CAP)
     if res == "full":
         if pulled:
-            repo.add_item(conn, gid, pulled["name"], pulled.get("description", ""))
+            repo.add_item(conn, gid, pulled["name"], pulled.get("description", ""),
+                          qty=pulled.get("qty", 1), image_url=pulled.get("image_url"))
         return _invalid(f"place_item: {row['name']} can carry no more")
     return _result("state", None if hidden else f"{row['name']} now has {nm}.")
 

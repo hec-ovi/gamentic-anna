@@ -13,7 +13,7 @@ def _enable_images(monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "GAMES_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(media, "generate_character_images", lambda d, style="", seed=None: None)
     monkeypatch.setattr(media, "generate_scene_image",
-                        lambda prompt, seed=None, width=None, height=None, references=None:
+                        lambda prompt, seed=None, width=None, height=None, references=None, interactive=False:
                         {"image_url": "/image/file?filename=x"})
     monkeypatch.setattr(media, "fetch_image_bytes", lambda url: b"PNG")
 

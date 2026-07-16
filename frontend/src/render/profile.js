@@ -1,6 +1,7 @@
 // The full-screen character profile: tabs, panes, the whisper channel.
 
 import { sameLocation, unreadPmCount } from "../adapters.js";
+import { state as appState } from "../app/ctx.js";
 import { icon } from "../icons.js";
 import { escapeHtml, holoFx, initials, stripWrappingQuotes, titleCase, unreadBadge } from "./common.js";
 import { playerSpeech, speakBtn } from "./story.js";
@@ -168,7 +169,11 @@ function actionsSection(d, stateChar, locked, presence) {
         <p class="absence-line">${escapeHtml(absenceLine(d, stateChar, presence.alive))}</p>
       </section>`;
   }
-  const actions = ((stateChar && stateChar.actions) || []).filter((a) => a.type !== "talk" && a.type !== "look" && a.type !== "search");
+  // look/search offers follow the images switch, like the scene bar (their payoff
+  // is the render); talk stays out regardless - whisper IS the private channel
+  const imagesOn = Boolean(appState.active && appState.active.state && appState.active.state.imagesEnabled);
+  const actions = ((stateChar && stateChar.actions) || []).filter(
+    (a) => a.type !== "talk" && (imagesOn || (a.type !== "look" && a.type !== "search")));
   if (!actions.length) return "";
   return `
     <section class="profile-sec">
@@ -268,10 +273,13 @@ export function renderWhisperChannel(s, g, d, locked) {
            id: "pm",
            mode: pf.mode,
            locked,
-           modes: ["say", "do"],
+           // a private Look (a quiet study of them) needs the render to pay off
+           modes: appState.active && appState.active.state && appState.active.state.imagesEnabled
+             ? ["say", "do", "look"] : ["say", "do"],
            placeholders: {
              say: `Whisper to ${name}...`,
              do: `A discreet act only ${name} notices...`,
+             look: `Quietly study ${name}... (what to look at?)`,
            },
            submitLabel: locked ? "Resolving..." : "Whisper",
          })}

@@ -18,7 +18,7 @@ def _enable_images(monkeypatch, tmp_path, captured):
     monkeypatch.setattr(settings, "GAMES_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(media, "generate_character_images", lambda d, style="", seed=None: None)
 
-    def _gen(prompt, seed=None, width=None, height=None, references=None):
+    def _gen(prompt, seed=None, width=None, height=None, references=None, interactive=False):
         captured.append({"prompt": prompt, "width": width, "height": height})
         return {"image_url": "/image/file?filename=item"}
     monkeypatch.setattr(media, "generate_scene_image", _gen)

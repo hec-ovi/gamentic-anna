@@ -120,9 +120,17 @@ def unhide(items_list: list[dict], name: str) -> bool:
 def set_item_image(conn, gid: str, name: str, url: str) -> bool:
     """Attach a generated image to an item WHEREVER it lives now (pack, any scene, any
     character): the item may have moved while the render ran in the background. Only fills
-    empty slots (an item never swaps an image it already has). Returns True if anything matched."""
+    empty slots (an item never swaps an image it already has). Returns True if anything matched.
+
+    Runs on the detached render pool against inventories a live turn may be rewriting.
+    BEGIN IMMEDIATE takes the write lock BEFORE the reads below, so they see the turn's
+    committed blobs instead of a pre-turn snapshot (the stale read-modify-write silently
+    dropped whatever the turn had just added - live shape: the fresh gold key vanished
+    when an older item card landed mid-turn)."""
     import json
     from . import characters, players
+    if not conn.in_transaction:
+        conn.execute("BEGIN IMMEDIATE")
     k = item_key(name)   # article-blind: the render may have been queued under 'rusted
     hit = False          # lantern' while the item still sits in scene as 'a rusted lantern'
 
