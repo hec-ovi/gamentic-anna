@@ -14,14 +14,90 @@ import io
 import logging
 import os
 import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
-from . import hostbridge
+from . import db, hostbridge
 from .config import settings
 from .providers import base as providers
 from .providers import image as image_providers
+
+
+# ---------- the player-facing images switch + render health ----------
+# The switch is a durable app_kv row (absent -> the IMAGE_ENABLED env default), so
+# the published executa (which receives no env) can turn art off per install. The
+# health block remembers WHY the last render failed, so /state can say "art is off",
+# "quota window exhausted" or "grant missing" instead of leaving eternal skeletons.
+
+_IMAGES_KV_KEY = "images_enabled"
+_img_state_lock = threading.Lock()
+_quota_pause_until = 0.0   # ambient renders pause until this ts after a -32106
+_images_status = "ok"      # ok | not_granted | no_provider (paused_quota derives)
+
+
+def images_on(conn=None) -> bool:
+    """The effective images switch: the stored per-install value, else the env default."""
+    def _read(c):
+        row = c.execute("SELECT value FROM app_kv WHERE key=?", (_IMAGES_KV_KEY,)).fetchone()
+        return row["value"] if row else None
+    try:
+        stored = _read(conn) if conn is not None else None
+        if conn is None:
+            with db.get_conn() as c:
+                stored = _read(c)
+    except Exception:
+        stored = None    # a missing table (mid-init) falls back to the env default
+    if stored is None:
+        return settings.IMAGE_ENABLED
+    return stored == "true"
+
+
+def set_images_enabled(conn, on: bool) -> None:
+    conn.execute("INSERT INTO app_kv (key, value) VALUES (?, ?) "
+                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                 (_IMAGES_KV_KEY, "true" if on else "false"))
+
+
+def images_paused() -> bool:
+    """True while the host's rolling image quota is exhausted: ambient render jobs
+    skip (and charge no heal attempts) instead of failing one by one."""
+    with _img_state_lock:
+        return time.time() < _quota_pause_until
+
+
+def images_status() -> str:
+    """ok | paused_quota | not_granted | no_provider - why art may be missing."""
+    with _img_state_lock:
+        if time.time() < _quota_pause_until:
+            return "paused_quota"
+        return _images_status
+
+
+def _note_image_result(exc: Exception | None) -> None:
+    """Classify a render outcome into the health block. Success clears it."""
+    global _quota_pause_until, _images_status
+    with _img_state_lock:
+        if exc is None:
+            _images_status = "ok"
+            return
+        if isinstance(exc, hostbridge.ImageQuotaExhausted):
+            _quota_pause_until = time.time() + settings.IMAGE_QUOTA_COOLDOWN
+            return
+        code = getattr(exc, "code", None)
+        if code == hostbridge.IMG_NOT_GRANTED:
+            _images_status = "not_granted"
+        elif code == hostbridge.IMG_NO_PROVIDER:
+            _images_status = "no_provider"
+
+
+def reset_image_state() -> None:
+    """Tests: forget quota pauses and failure classifications."""
+    global _quota_pause_until, _images_status
+    with _img_state_lock:
+        _quota_pause_until = 0.0
+        _images_status = "ok"
 
 
 # ---------- voice-api (local registry back-compat; the engine composes voice
@@ -186,12 +262,15 @@ def _provider() -> image_providers.ImageProvider:
 
 def generate_character_images(descriptor: str, style: str = "", seed: int | None = None) -> dict | None:
     """Returns {face_url, body_front_url, body_side_url, seed} or None."""
-    if not settings.IMAGE_ENABLED or not descriptor.strip():
+    if not images_on() or not descriptor.strip():
         return None
     try:
         with _render_gate():
-            return _provider().character_set(descriptor, style, seed=seed)
+            out = _provider().character_set(descriptor, style, seed=seed)
+        _note_image_result(None)
+        return out
     except Exception as exc:
+        _note_image_result(exc)
         logging.getLogger("gamentic.image").warning("character_set swallowed: %r", exc)
         return None
 
@@ -201,13 +280,16 @@ def generate_character_view(descriptor: str, style: str, view: str,
                             seed: int | None = None) -> str | None:
     """ONE missing view of a character's reference set (the heal path). Returns the
     image url or None; failures are swallowed like every other render."""
-    if not settings.IMAGE_ENABLED or not descriptor.strip():
+    if not images_on() or not descriptor.strip():
         return None
     try:
         with _render_gate():
-            return _provider().character_view(descriptor, style, view,
-                                              reference=reference, seed=seed)
+            out = _provider().character_view(descriptor, style, view,
+                                             reference=reference, seed=seed)
+        _note_image_result(None)
+        return out
     except Exception as exc:
+        _note_image_result(exc)
         logging.getLogger("gamentic.image").warning("character_view(%s) swallowed: %r", view, exc)
         return None
 
@@ -223,9 +305,16 @@ _data_uri_cache: dict[str, tuple[float, str]] = {}   # path -> (mtime, uri)
 _data_uri_lock = threading.Lock()
 
 
+def _thumb_cache_path(path: str) -> str:
+    return os.path.join(os.path.dirname(path), ".cache", os.path.basename(path) + ".jpg")
+
+
 def image_data_uri(path: str) -> str | None:
     """A downscaled JPEG data: URI for one persisted image file, cached by mtime so
-    repeat requests never re-encode. None when the file is unreadable."""
+    repeat requests never re-encode. The encoded JPEG also persists next to the
+    original (images/.cache/), so an executa restart resumes from disk instead of
+    re-encoding a mature adventure's whole set on first open (the rejoin stall).
+    None when the file is unreadable."""
     try:
         mtime = os.path.getmtime(path)
     except OSError:
@@ -234,18 +323,36 @@ def image_data_uri(path: str) -> str | None:
         hit = _data_uri_cache.get(path)
         if hit and hit[0] == mtime:
             return hit[1]
-    try:
-        from PIL import Image
-        im = Image.open(path)
-        if im.mode not in ("RGB", "L"):
-            im = im.convert("RGB")
-        im.thumbnail((_DATA_URI_MAX_PX, _DATA_URI_MAX_PX))
-        buf = io.BytesIO()
-        im.save(buf, "JPEG", quality=_DATA_URI_QUALITY)
-        uri = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception as exc:
-        logging.getLogger("gamentic.image").warning("data-uri encode failed for %s: %r", path, exc)
-        return None
+    cache_file = _thumb_cache_path(path)
+    uri = None
+    try:                                    # disk hit: skip the PIL re-encode. The cache
+        # file carries the SOURCE's mtime (stamped at write), so the check is exact
+        # equality like the in-memory cache - any replaced source re-encodes.
+        if os.path.getmtime(cache_file) == mtime:
+            with open(cache_file, "rb") as f:
+                uri = "data:image/jpeg;base64," + base64.b64encode(f.read()).decode("ascii")
+    except OSError:
+        pass
+    if uri is None:
+        try:
+            from PIL import Image
+            im = Image.open(path)
+            if im.mode not in ("RGB", "L"):
+                im = im.convert("RGB")
+            im.thumbnail((_DATA_URI_MAX_PX, _DATA_URI_MAX_PX))
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=_DATA_URI_QUALITY)
+            uri = "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+        except Exception as exc:
+            logging.getLogger("gamentic.image").warning("data-uri encode failed for %s: %r", path, exc)
+            return None
+        try:                                # best-effort: a read-only disk just re-encodes
+            os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+            with open(cache_file, "wb") as f:
+                f.write(base64.b64decode(uri.split(",", 1)[1]))
+            os.utime(cache_file, (mtime, mtime))   # stamp = the source it encodes
+        except OSError:
+            pass
     with _data_uri_lock:
         if len(_data_uri_cache) >= 256:     # a full game set is way under this
             _data_uri_cache.clear()
@@ -282,13 +389,16 @@ def generate_scene_image(prompt: str, seed: int | None = None,
     providers that don't silently fall back to plain t2i. interactive=True takes the
     player-facing lane (a look/show_image the player is watching for) so it never
     waits behind the ambient render backlog on the Anna path."""
-    if not settings.IMAGE_ENABLED or not prompt.strip():
+    if not images_on() or not prompt.strip():
         return None
     try:
         with _render_gate(interactive):
-            return _provider().generate(
+            out = _provider().generate(
                 prompt, (width or settings.IMAGE_SCENE_W, height or settings.IMAGE_SCENE_H),
                 seed=seed, references=references)
+        _note_image_result(None)
+        return out
     except Exception as exc:
+        _note_image_result(exc)
         logging.getLogger("gamentic.image").warning("scene image gen swallowed: %r", exc)
         return None

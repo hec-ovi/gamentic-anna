@@ -313,7 +313,11 @@ def test_native_image_pipeline_media_refs_and_media64(host_images):
     assert scene_url and scene_url.startswith(f"/media/{gid}/"), state["scene"]
     assert face_url and face_url.startswith(f"/media/{gid}/char-"), state["characters"][0]
     assert "data:" not in json.dumps(state)
-    assert host.image_calls >= 4            # 3 character views + the scene render
+    # Anna creation order is quota-aware: the scene + one FACE per character render
+    # now; front/side views defer to the per-turn heal (the host's image quota is a
+    # rolling per-invoke window, and first sight should spend it on what shows)
+    assert host.image_calls >= 2            # the scene render + the face view
+    assert not state["characters"][0].get("body_front_url")   # deferred to the heal
 
     # the iframe's one-time pull: /media64 turns the ref into a data: URI
     got = host.invoke("/media64" + face_url[len("/media"):])

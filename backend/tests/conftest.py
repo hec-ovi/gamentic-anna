@@ -123,13 +123,14 @@ def fresh_db():
 
 @pytest.fixture(autouse=True)
 def fresh_job_registries():
-    """The render jobs keep process-global state (in-flight claims, per-asset heal
-    attempt meters, uploaded-reference cache). Each test starts clean so one test's
-    exhausted heal meter never mutes another's render."""
+    """The render jobs keep process-global state (in-flight claims, the uploaded-
+    reference cache, the quota pause + failure classification). Each test starts
+    clean so one test's quota pause never mutes another's render. Heal meters now
+    live in app_kv, so the fresh DB resets them on its own."""
     from app.integrate import jobs
     jobs._inflight.clear()
-    jobs._heal_attempts.clear()
     jobs._uploaded_refs.clear()
+    media.reset_image_state()
     yield
 
 

@@ -8,7 +8,7 @@ import { showToast } from "./cues.js";
 import { resetMediaCache } from "./mediacache.js";
 import { withVoice } from "./speech.js";
 import { lastTurnIndexOf } from "./turns.js";
-import { stopMediaWatch, watchMedia } from "./mediastream.js";
+import { pollBurst, stopMediaWatch, watchMedia } from "./mediastream.js";
 import { focusComposer, render } from "./ui.js";
 
 // ---------------------------------------------------------------------------
@@ -17,16 +17,36 @@ import { focusComposer, render } from "./ui.js";
 
 export async function refreshLibrary() {
   try {
-    const res = await api.listGames();
+    // the images switch rides along (best-effort: an older engine without the
+    // endpoint just leaves the toggle hidden)
+    const [res, app] = await Promise.all([
+      api.listGames(),
+      api.appSettings().catch(() => null),
+    ]);
     state.backendOnline = true;
     state.backendError = "";
     state.games = (res && res.games) || [];
+    if (app) state.appImages = { enabled: Boolean(app.images_enabled), status: app.images_status || "ok" };
   } catch (err) {
     state.backendOnline = false;
     state.backendError = err.message || "unreachable";
     state.games = [];
   }
   if (state.view === "library" || state.view === "menu") render();
+}
+
+// The library's images switch: flip the install-wide setting. Turning it off stops
+// NEW renders (and hides look actions + loaders); art already painted stays.
+export async function toggleImages() {
+  const cur = state.appImages ? state.appImages.enabled : true;
+  try {
+    const res = await api.patchAppSettings({ images_enabled: !cur });
+    state.appImages = { enabled: Boolean(res.images_enabled), status: res.images_status || "ok" };
+    if (state.active && state.active.state) state.active.state.imagesEnabled = Boolean(res.images_enabled);
+  } catch (err) {
+    showToast(err.message || "Could not change the images setting.");
+  }
+  render();
 }
 
 // Wipe ALL memory: every game, creator session, voice entry and media folder
@@ -113,6 +133,9 @@ export async function openGame(gameId) {
     if (state.active) state.active.generating = false;
     render();
     watchMedia(state.active); // media-ready push + the slow fallback sweep
+    // creation/heal renders may still be landing when the player (re)joins; under
+    // Anna there is no SSE, so burst-poll now instead of waiting for the 60s sweep
+    if (state.active) pollBurst(state.active);
     // joining a game seats you at the keyboard, same as a finished turn does
     // (live: activeElement was <body> on entry and the first action needed a click)
     if (state.active && state.view === "play") focusComposer("#cmpInput");

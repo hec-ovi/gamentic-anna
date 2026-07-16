@@ -30,6 +30,7 @@ export const state = {
   backendError: "",
   active: null, // { id, state(mapped), beats(mapped), generating, composer, profile, give, revealedArt }
   creator: { sessionId: "creator-" + rand(), messages: [], busy: false, error: "" },
+  appImages: null, // { enabled, status } from GET /settings/app (the library's images switch)
   confirm: null, // { gameId, title } when a delete confirmation is open
   exportChoice: null, // { gameId, title } when a card's export choice (share/save) is open
   wipe: null, // { stage: 1|2, busy } when the wipe-all double confirm is open

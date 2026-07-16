@@ -296,6 +296,7 @@ class GameState(BaseModel):
     settings: dict = Field(default_factory=dict)  # {narrator_gender, difficulty} (live-changeable)
     context: dict = Field(default_factory=dict)   # {used, max} prompt-token usage meter
     images_enabled: bool = True                   # if true and an image_url is null, art is still coming (show a loader)
+    images_status: str = "ok"                     # ok | paused_quota | not_granted | no_provider (why art is missing)
     time: dict = Field(default_factory=dict)      # fictional story clock {minutes, day, hour, part, label}
     player: PlayerStateOut
     quests: list[QuestOut]

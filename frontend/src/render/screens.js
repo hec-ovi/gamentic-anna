@@ -100,6 +100,7 @@ export function renderLibrary(state) {
           ${icon("rotate")}<span>${state.importing ? "Importing..." : "Import"}</span>
         </button>
         <input type="file" id="importFile" accept=".json,application/json" hidden aria-label="Adventure export file" />
+        ${imagesToggle(state.appImages)}
         ${state.annaMode ? "" : iconBtn({ act: "open-settings", icon: "settings", label: "Settings" })}
       </header>
       <main class="lib-main">${body}</main>
@@ -123,6 +124,18 @@ export function renderGameCard(game) {
         ${iconBtn({ act: "ask-delete", icon: "trash", label: "Delete adventure", title: "Delete", cls: "danger", data: { "game-id": game.id, "game-title": game.title } })}
       </div>
     </article>`;
+}
+
+// The install-wide images switch. It lives on the library header so it survives
+// Anna mode (the settings screen is hidden there). null (an older engine without
+// /settings/app) renders nothing. Turning it off stops NEW renders; painted art stays.
+export function imagesToggle(appImages) {
+  if (!appImages) return "";
+  const on = Boolean(appImages.enabled);
+  return `<button class="holo-btn lib-images" data-act="toggle-images" role="switch" aria-checked="${on}"
+            title="${on ? "Images on: scenes, portraits and item cards render as you play" : "Images off: pure text; art already painted stays"}">
+            ${icon("eye")}<span>Images ${on ? "on" : "off"}</span>
+          </button>`;
 }
 
 // Export choice: one adventure, two flavors. Template = the world as designed

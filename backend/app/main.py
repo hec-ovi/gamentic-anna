@@ -84,10 +84,9 @@ def create_game(sheet: WorldSheet, background_tasks: BackgroundTasks):
     # the slow image renders queue behind them
     _schedule(background_tasks, creator.enrich_origins, gid)
     # First-sight art is ONE composed pass (integrate.generate_creation_art): the art
-    # director writes the prompts from the whole world bible, then the owner's render
-    # order holds - portraits first (identity references), seeded item cards, the main
-    # opening image last, delivered by SSE the moment each lands.
-    if settings.IMAGE_ENABLED:                               # images are optional
+    # director writes the prompts from the whole world bible, then the stack's render
+    # order holds (see generate_creation_art), each image delivered the moment it lands.
+    if media.images_on():                                    # images are optional
         _schedule(background_tasks, integrate.generate_creation_art, gid, scene_id)
     return {"game_id": gid}
 
@@ -119,6 +118,34 @@ def media_data_uri(gid: str, name: str):
     if not uri:
         raise HTTPException(502, "image could not be encoded")
     return {"uri": uri}
+
+
+MEDIA64_BATCH_MAX = 12
+
+
+@app.post("/media64/batch")
+def media_data_uri_batch(body: dict):
+    """Several images in ONE invoke round-trip: {"urls": ["/media/<gid>/<name>", ...]}
+    -> {"uris": {url: data-uri-or-null}}. Rejoining a mature adventure used to resolve
+    every image through its own invoke (each a full host round-trip, four at a time);
+    batching collapses that fan-out into a couple of calls. Unresolvable entries come
+    back null (the client keeps its per-url failure accounting)."""
+    urls = body.get("urls")
+    if not isinstance(urls, list) or not urls:
+        raise HTTPException(422, "urls must be a non-empty list")
+    if len(urls) > MEDIA64_BATCH_MAX:
+        raise HTTPException(422, f"at most {MEDIA64_BATCH_MAX} urls per call")
+    out = {}
+    for url in urls:
+        uri = None
+        m = re.fullmatch(r"/media/([^/]+)/([^/]+)", url) if isinstance(url, str) else None
+        if m:
+            try:
+                uri = media.image_data_uri(_media_file_path(m.group(1), m.group(2)))
+            except HTTPException:
+                uri = None
+        out[url if isinstance(url, str) else str(url)] = uri
+    return {"uris": out}
 
 
 @app.get("/games")
@@ -158,10 +185,11 @@ def import_game(payload: dict, background_tasks: BackgroundTasks):
             raise HTTPException(400, str(e))
         integrate.assign_voices_for_game(conn, gid)
         scene = repo.current_scene(conn, gid)
-        need_scene_art = settings.IMAGE_ENABLED and not scene["image_url"]
+        images = media.images_on(conn)
+        need_scene_art = images and not scene["image_url"]
         scene_id = scene["id"]
     _schedule(background_tasks, creator.enrich_origins, gid)   # imported templates may be thin too
-    if settings.IMAGE_ENABLED:
+    if images:
         _schedule(background_tasks, integrate.generate_images_for_game, gid)  # missing portraits
     if need_scene_art:
         _schedule(background_tasks, integrate.generate_scene_image, gid, scene_id)
@@ -224,6 +252,7 @@ def wipe_everything(confirm: str = ""):
         for gid in gids:
             repo.delete_game(conn, gid)
         conn.execute("DELETE FROM creator_sessions")
+        repo.kv_delete_prefix(conn, "heal:")     # per-asset render meters die with the games
     folders = integrate.delete_all_media()           # all folders, orphans included
     integrate.release_game_voices(char_ids)
     # best-effort service purges AFTER our own state is gone: a dead media service
@@ -252,6 +281,7 @@ def delete_game(gid: str):
         staging = integrate.remote_image_urls(conn, gid) if exists else []
         if not repo.delete_game(conn, gid):
             raise HTTPException(404, "game not found")
+        repo.kv_delete_prefix(conn, f"heal:{gid}:")  # its render meters die with it
     integrate.delete_game_images(gid)        # wipe the per-game image folder too
     integrate.release_game_voices(char_ids)  # free their voice-registry entries too
     for url in staging:                      # free their staging files on the image-api side
@@ -318,29 +348,30 @@ def _resolved_turn(gid: str, background_tasks: BackgroundTasks, text: str = "",
             integrate.assign_voices_for_game(conn, gid)      # voice for the newcomer (inline)
         scene = repo.current_scene(conn, gid)
         scene_id = scene["id"]
-        need_scene_art = settings.IMAGE_ENABLED and not scene["image_url"]
+        images = media.images_on(conn)
+        need_scene_art = images and not scene["image_url"]
         # portrait self-heal: a crashed background job leaves characters without their
         # reference set; any later turn notices and re-schedules (idempotent: done
         # characters are skipped, files on disk are relinked, not re-rendered)
-        need_portraits = settings.IMAGE_ENABLED and any(
+        need_portraits = images and any(
             c["alive"] and not repo.character_has_images(c)
             for c in repo.get_characters(conn, gid))
-    if settings.IMAGE_ENABLED and (result.get("spawned") or need_portraits):
+    if images and (result.get("spawned") or need_portraits):
         _schedule(background_tasks, integrate.generate_images_for_game, gid)  # portraits (background)
     if need_scene_art:
         _schedule(background_tasks, integrate.generate_scene_image, gid, scene_id)  # new-scene art
     shot = result.pop("image_request", None)                 # the narrator's show_image call
-    if settings.IMAGE_ENABLED and shot:
+    if images and shot:
         _schedule(background_tasks, integrate.generate_directed_image, gid,
                                   shot["description"], shot["caption"])
     fallback = result.pop("view_fallback", None)             # a look the narrator didn't render
-    if settings.IMAGE_ENABLED and fallback is not None:
+    if images and fallback is not None:
         _schedule(background_tasks, integrate.generate_view_snapshot, gid, fallback or None)
     for cid, focus in result.pop("private_looks", []):       # quiet studies -> private thread
-        if settings.IMAGE_ENABLED:
+        if images:
             _schedule(background_tasks, integrate.generate_view_snapshot, gid, focus, cid)
     new_items = result.pop("new_items", None) or []          # items newly visible this turn
-    if settings.IMAGE_ENABLED and settings.IMAGE_ITEMS:
+    if images and settings.IMAGE_ITEMS:
         # self-heal like portraits: pick up items whose card never rendered (per-turn cap
         # overflow, a failed render, or pre-feature acquisitions), newest first
         if len(new_items) < settings.IMAGE_MAX_ITEMS_PER_TURN:
@@ -425,6 +456,28 @@ def update_settings(gid: str, body: GameSettingsIn):
                 "narrator_voice_id": g["narrator_voice_id"]}
 
 
+@app.get("/settings/app")
+def get_app_settings():
+    """Install-wide settings (they are not per-game): the player-facing images switch
+    plus the render health the UI explains missing art with."""
+    return {"images_enabled": media.images_on(), "images_status": media.images_status()}
+
+
+@app.patch("/settings/app")
+def update_app_settings(body: dict):
+    """Flip install-wide settings. images_enabled=false stops SCHEDULING renders (already
+    persisted art stays; the UI keeps showing it and just hides loaders and look actions).
+    The stored value overrides the IMAGE_ENABLED env default from then on."""
+    if not isinstance(body, dict) or "images_enabled" not in body:
+        raise HTTPException(422, "expected {\"images_enabled\": true|false}")
+    val = body["images_enabled"]
+    if not isinstance(val, bool):
+        raise HTTPException(422, "images_enabled must be a boolean")
+    with db.get_conn() as conn:
+        media.set_images_enabled(conn, val)
+    return {"images_enabled": val, "images_status": media.images_status()}
+
+
 @app.get("/games/{gid}/characters/{cid}/profile")
 def character_profile(gid: str, cid: str):
     """The full-screen character view: public card data, traits unlocked through play,
@@ -448,8 +501,8 @@ def view_scene(gid: str, body: ViewIn | None = None):
     with db.get_conn() as conn:
         if not repo.get_game(conn, gid):
             raise HTTPException(404, "game not found")
-    if not settings.IMAGE_ENABLED:
-        raise HTTPException(409, "images are disabled")
+        if not media.images_on(conn):
+            raise HTTPException(409, "images are disabled")
     beat = integrate.generate_view_snapshot(gid, focus=body.focus if body else None)
     if not beat:
         raise HTTPException(502, "image generation unavailable")
@@ -538,9 +591,8 @@ def create_finalize(body: dict, background_tasks: BackgroundTasks):
         raise HTTPException(409, str(e))
     _schedule(background_tasks, creator.enrich_origins, gid)   # thin backstories get real ones
     # same first-sight pass as POST /games: the art director writes the prompts, then
-    # portraits (identity refs), seeded item cards, the main opening image (SSE
-    # delivers each the moment it lands)
-    if settings.IMAGE_ENABLED:
+    # the stack's render order holds (each image delivered the moment it lands)
+    if media.images_on():
         _schedule(background_tasks, integrate.generate_creation_art, gid, scene_id)
     return {"game_id": gid}
 
@@ -558,6 +610,6 @@ def create_quick(body: dict, background_tasks: BackgroundTasks):
         integrate.assign_voices_for_game(conn, gid)
         scene_id = repo.current_scene(conn, gid)["id"]
     _schedule(background_tasks, creator.enrich_origins, gid)   # thin backstories get real ones
-    if settings.IMAGE_ENABLED:
+    if media.images_on():
         _schedule(background_tasks, integrate.generate_creation_art, gid, scene_id)
     return {"game_id": gid}

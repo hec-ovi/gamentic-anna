@@ -149,11 +149,19 @@ class Settings:
     # keeps its strict one-render-at-a-time lock regardless of this value.
     IMAGE_CONCURRENCY = max(1, int(os.getenv("IMAGE_CONCURRENCY", "2")))
     # Self-heal attempt ceiling PER ASSET (a character's set, one item card, one
-    # scene) for this process's life. The per-turn self-heal used to re-render a
-    # failing asset every single turn forever (the render loop); after this many
-    # failed passes it stops and the UI keeps its graceful fallback (initials /
-    # no card). An executa restart grants a fresh allowance.
+    # scene). The per-turn self-heal used to re-render a failing asset every single
+    # turn forever (the render loop); after this many failed passes it stops and the
+    # UI keeps its graceful fallback (initials / no card). Counters persist in the DB
+    # (app_kv), so an executa restart does NOT re-open a poisoned asset's allowance;
+    # a successful render clears its counter.
     IMAGE_HEAL_MAX_ATTEMPTS = max(1, int(os.getenv("IMAGE_HEAL_MAX_ATTEMPTS", "3")))
+    # Optional provider hint for Anna's image/generate (modelPreferences.hints[].name,
+    # e.g. "dall-e-3"). Empty = let the host route to the user's preferred provider.
+    IMAGE_MODEL_HINT = os.getenv("IMAGE_MODEL_HINT", "").strip()
+    # When the host reports the per-invoke image quota exhausted (-32106, a rolling
+    # ~30min window), ambient rendering pauses this many seconds instead of burning
+    # heal attempts on renders that cannot succeed. Player-initiated looks still try.
+    IMAGE_QUOTA_COOLDOWN = max(60, int(os.getenv("IMAGE_QUOTA_COOLDOWN", "600")))
 
     # --- Voice integration (orchestrator -> voice-api, server to server) ---
     VOICE_API_URL = os.getenv("VOICE_API_URL", "http://localhost:9002")

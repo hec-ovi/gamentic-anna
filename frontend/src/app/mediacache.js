@@ -44,29 +44,59 @@ export function resolveMediaUrl(url) {
   return null;
 }
 
-async function fetchMedia(url) {
-  if (inflight.has(url) || (failures.get(url) || 0) >= MAX_ATTEMPTS) return;
-  inflight.add(url);
+// A render pass asks for many images at once (rejoining a mature adventure: the
+// scene, every avatar, the transcript's shots). Each used to fire its OWN invoke -
+// a full host round-trip, four at a time. Requests now pool for a beat and go out
+// as POST /media64/batch chunks, collapsing the fan-out into a couple of calls.
+const BATCH_DELAY_MS = 25;
+const BATCH_MAX = 12; // the engine's MEDIA64_BATCH_MAX
+const queued = new Set();
+let flushTimer = null;
+
+function fetchMedia(url) {
+  if (inflight.has(url) || queued.has(url) || (failures.get(url) || 0) >= MAX_ATTEMPTS) return;
+  queued.add(url);
+  if (flushTimer == null) flushTimer = setTimeout(flushQueue, BATCH_DELAY_MS);
+}
+
+function noteFailure(url, hard) {
+  const n = (failures.get(url) || 0) + 1;
+  failures.set(url, n);
+  // hard = the engine answered and said no (missing file: MOSTLY a race - the beat
+  // landed before its file finished persisting). Retriable on later renders until
+  // attempts run out, then '' (the caller's no-image fallback). Transport errors
+  // never poison the cache: a later render simply retries.
+  if (hard && n >= MAX_ATTEMPTS) cache.set(url, "");
+}
+
+async function flushQueue() {
+  flushTimer = null;
+  const urls = [...queued];
+  queued.clear();
+  urls.forEach((u) => inflight.add(u));
   try {
-    const res = await api.media64(url);
-    if (res && res.uri) {
-      cache.set(url, res.uri);
-      failures.delete(url);
-    } else {
-      cache.set(url, ""); // the engine answered but could not encode: stop asking
+    for (let i = 0; i < urls.length; i += BATCH_MAX) {
+      const chunk = urls.slice(i, i + BATCH_MAX);
+      try {
+        const res = await api.media64Batch(chunk);
+        const uris = (res && res.uris) || {};
+        for (const u of chunk) {
+          if (uris[u]) {
+            cache.set(u, uris[u]);
+            failures.delete(u);
+          } else {
+            noteFailure(u, true);
+          }
+        }
+        scheduleNotify();
+      } catch {
+        chunk.forEach((u) => noteFailure(u, false)); // transport blip: retriable
+      } finally {
+        chunk.forEach((u) => inflight.delete(u));
+      }
     }
-    scheduleNotify();
-  } catch (err) {
-    const n = (failures.get(url) || 0) + 1;
-    failures.set(url, n);
-    if (err && err.status === 404) {
-      // MOSTLY a race: the beat landed before its file finished persisting.
-      // Leave it retriable (the next render try re-fetches) until attempts run out.
-      if (n >= MAX_ATTEMPTS) cache.set(url, "");
-    }
-    // transient transport errors: stay out of the cache so a later render retries
   } finally {
-    inflight.delete(url);
+    urls.forEach((u) => inflight.delete(u)); // belt and braces on early exits
   }
 }
 
@@ -75,4 +105,7 @@ export function resetMediaCache() {
   cache.clear();
   inflight.clear();
   failures.clear();
+  queued.clear();
+  if (flushTimer != null) clearTimeout(flushTimer);
+  flushTimer = null;
 }

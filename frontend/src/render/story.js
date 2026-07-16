@@ -81,7 +81,13 @@ export function sceneArtCard(s) {
             </figure>`;
   }
   if (s.imagesEnabled) {
-    return artLoading("prose-art", "visual manifesting...", "Scene art is being painted", "figure");
+    // the skeleton says WHY when the host is the holdup, instead of promising
+    // art that a quota window or a missing grant will never deliver
+    const hint = { paused_quota: "art paused (image quota)",
+                   not_granted: "art needs image permissions",
+                   no_provider: "no image provider on this plan" }[s.imagesStatus];
+    return artLoading("prose-art", hint || "visual manifesting...",
+                      "Scene art is being painted", "figure");
   }
   return "";
 }

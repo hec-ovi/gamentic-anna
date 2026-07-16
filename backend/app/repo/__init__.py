@@ -26,6 +26,9 @@ from .characters import (  # noqa: F401
 from .clock import (  # noqa: F401
     START_HOURS, advance_time, elapsed_text, game_time, start_minutes, time_at,
 )
+from .kv import (  # noqa: F401
+    kv_delete, kv_delete_prefix, kv_get, kv_increment, kv_set,
+)
 from .games import (  # noqa: F401
     append_memory, clear_arrival_note, create_game, delete_game,
     effective_context_tokens, effective_history_beats, effective_summary_every,

@@ -6,7 +6,7 @@ import logging
 import re
 from collections import deque
 
-from .. import repo, prompts, tools, llm
+from .. import repo, prompts, tools, llm, media
 from ..config import settings
 from . import parsing
 
@@ -579,7 +579,7 @@ def run_turn(conn, gid: str, action_text: str = "", segments=None,
         reply = llm.chat(
             messages,
             tools=tools.narrator_tools(adjudicating=bool(pending),
-                                       images=settings.IMAGE_ENABLED),
+                                       images=media.images_on(conn)),
             tool_choice="auto",
             temperature=settings.NARRATOR_TEMPERATURE, max_tokens=settings.NARRATOR_MAX_TOKENS,
             stop=stops or None, thinking=settings.NARRATOR_THINKING,

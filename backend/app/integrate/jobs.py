@@ -47,26 +47,36 @@ def _claim(*key):
 # Bounded self-healing. The per-turn heal re-schedules any asset still missing,
 # which used to LOOP: an asset whose render kept failing the same way (a view
 # the host kept rejecting, an item whose attach kept missing) re-rendered every
-# turn forever. Each asset now gets IMAGE_HEAL_MAX_ATTEMPTS failed passes per
-# process life, then the heal leaves it alone (the UI keeps its fallback). A
-# success clears the meter; an executa restart grants a fresh allowance.
+# turn forever. Each asset gets IMAGE_HEAL_MAX_ATTEMPTS failed passes, counted
+# DURABLY in app_kv: the agent runtime restarts the executa often, and in-memory
+# meters re-opened every poisoned asset's allowance on each restart (the
+# "images keep regenerating" feel). A success clears the meter; a quota pause
+# (media.images_paused) charges nothing - the window clears on its own.
 # ---------------------------------------------------------------------------
-_heal_attempts: dict[tuple, int] = {}
+
+def _heal_key(*key) -> str:
+    return "heal:" + ":".join(str(k) for k in key)
 
 
 def _heal_exhausted(*key) -> bool:
-    with _inflight_lock:
-        return _heal_attempts.get(key, 0) >= settings.IMAGE_HEAL_MAX_ATTEMPTS
+    with db.get_conn() as conn:
+        v = repo.kv_get(conn, _heal_key(*key))
+    return int(v or 0) >= settings.IMAGE_HEAL_MAX_ATTEMPTS
 
 
-def _heal_charge(*key) -> None:
-    with _inflight_lock:
-        _heal_attempts[key] = _heal_attempts.get(key, 0) + 1
+def _heal_charge(*key, conn=None) -> None:
+    if media.images_paused():
+        return    # the quota window failed the render, not the asset
+    if conn is not None:    # inside a caller's transaction: NEVER nest a second
+        repo.kv_increment(conn, _heal_key(*key))    # writer (WAL deadlocks on it)
+        return
+    with db.get_conn() as c:
+        repo.kv_increment(c, _heal_key(*key))
 
 
 def _heal_clear(*key) -> None:
-    with _inflight_lock:
-        _heal_attempts.pop(key, None)
+    with db.get_conn() as conn:
+        repo.kv_delete(conn, _heal_key(*key))
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +247,8 @@ def generate_item_image(gid: str, name: str) -> dict | None:
 
 def _generate_item_image(gid: str, name: str) -> dict | None:
     key = repo.item_key(name)
+    if media.images_paused():
+        return None    # quota window exhausted; the per-turn heal retries after it clears
     if _heal_exhausted(gid, "item", key):
         return None    # this card kept failing; stop re-rendering it every turn
     with db.get_conn() as conn:
@@ -262,7 +274,7 @@ def _generate_item_image(gid: str, name: str) -> dict | None:
             return None    # game wiped while rendering: never re-create its media folder
         url = storage._persist(gid, result["image_url"], f"item-{image_prompts._slug(name)}")
         if not repo.set_item_image(conn, gid, name, url):
-            _heal_charge(gid, "item", key)             # the item vanished mid-render
+            _heal_charge(gid, "item", key, conn=conn)  # the item vanished mid-render
             return None
         beat = repo.add_beat(conn, gid, "system", None, "image",
                              image_prompts._concept(entry["name"], entry["description"]), loc,
@@ -311,23 +323,27 @@ def art_direction(gid: str) -> dict | None:
     return {"main_image": main, "characters": cast}
 
 
-def generate_images_for_game(gid: str, direction: dict | None = None) -> None:
-    """Background: generate + persist the 3-image reference set for each character.
+def generate_images_for_game(gid: str, direction: dict | None = None,
+                             views: tuple | None = None) -> None:
+    """Background: generate + persist the reference set for each character.
     Resilient (live bug: a 'database is locked' on ONE character's commit killed the
     whole loop, leaving every portrait null): each character is independent, files
     already on disk are RELINKED instead of re-rendered, and the per-turn self-heal
     re-schedules this job until every character has their set. An art-director
-    `direction` (creation only) supplies the descriptor; the sheet template is the net."""
+    `direction` (creation only) supplies the descriptor; the sheet template is the net.
+    `views` limits the pass to those views (creation under Anna renders faces first,
+    the quota-friendly order; the heal completes front/side on later turns)."""
     with _claim(gid, "portraits") as won:
         if not won:
             return    # a portrait pass for this game is already in flight
-        _generate_images_for_game(gid, direction)
+        _generate_images_for_game(gid, direction, views)
 
 
 _VIEW_KEYS = (("face", "face_url"), ("front", "body_front_url"), ("side", "body_side_url"))
 
 
-def _generate_images_for_game(gid: str, direction: dict | None = None) -> None:
+def _generate_images_for_game(gid: str, direction: dict | None = None,
+                              views: tuple | None = None) -> None:
     with db.get_conn() as conn:
         g = repo.get_game(conn, gid)
         if not g:
@@ -338,25 +354,30 @@ def _generate_images_for_game(gid: str, direction: dict | None = None) -> None:
 
     def _one(c) -> None:
         try:
+            if media.images_paused():
+                return   # quota window exhausted; the heal resumes after it clears
             cid = c["id"]
             # what this character already HAS: DB truth merged with disk truth (a
             # crashed run may have written files without committing the row)
             have = {key: c[key] for _, key in _VIEW_KEYS if c[key]}
             have.update(storage._existing_char_urls(gid, cid))
-            missing = [(view, key) for view, key in _VIEW_KEYS if not have.get(key)]
+            missing = [(view, key) for view, key in _VIEW_KEYS
+                       if not have.get(key) and (views is None or view in views)]
             if missing and _heal_exhausted(gid, "char", cid):
                 return   # this set kept failing; stop re-rendering it every turn
             rendered: dict = {}
-            if len(missing) == 3:
-                # nothing yet: the one-shot set render (comfy's server-side 3-view
-                # unit / the cloud face->front/side chain). PARTIAL results persist:
-                # the heal completes the rest view by view on a later pass.
+            if len(missing) == 3 and not hostbridge.active():
+                # nothing yet, local stack: the one-shot set render (comfy's
+                # server-side 3-view unit). PARTIAL results persist: the heal
+                # completes the rest view by view on a later pass.
                 descriptor = (directed.get((c["name"] or "").strip().lower())
                               or image_prompts.character_descriptor(c))
                 rendered = media.generate_character_images(descriptor, style) or {}
             elif missing:
-                # a partial set: render ONLY the missing views, identity-conditioned
-                # on the face we already have (never re-render what landed)
+                # view by view, identity-conditioned on the face we already have
+                # (never re-render what landed). Under Anna this is ALSO the
+                # full-set path: each landed view persists on its own, so a quota
+                # hit mid-set can't throw away a face that already cost quota.
                 descriptor = (directed.get((c["name"] or "").strip().lower())
                               or image_prompts.character_descriptor(c))
                 face_ref = have.get("face_url")
@@ -374,13 +395,13 @@ def _generate_images_for_game(gid: str, direction: dict | None = None) -> None:
                     if rendered.get(key):
                         have[key] = storage._persist(gid, rendered[key], f"char-{cid}-{view}")
                 if not have:
-                    _heal_charge(gid, "char", cid)   # a fully-failed pass burns one try
+                    _heal_charge(gid, "char", cid, conn=conn)  # a fully-failed pass burns one try
                     return
                 repo.set_character_images(conn, cid, **{key: have.get(key) for _, key in _VIEW_KEYS})
             if all(have.get(key) for _, key in _VIEW_KEYS):
                 _heal_clear(gid, "char", cid)
-            elif missing:
-                _heal_charge(gid, "char", cid)       # progressed but still partial
+            elif missing and not rendered:
+                _heal_charge(gid, "char", cid)       # attempted views, none landed
             if rendered:
                 events.publish(gid, "portrait", char_id=cid)
         except Exception:
@@ -391,8 +412,8 @@ def _generate_images_for_game(gid: str, direction: dict | None = None) -> None:
         return
     if hostbridge.active() and settings.IMAGE_CONCURRENCY > 1 and len(todo) > 1:
         # Anna path: characters render concurrently up to the ambient lane width
-        # (each character_set still holds ONE ambient slot for its 3 views). This is
-        # what keeps a whole cast inside the ~600s reverse-RPC token TTL.
+        # (each character still holds ONE ambient slot per view). This is what
+        # keeps a whole cast inside the ~600s reverse-RPC token TTL.
         with ThreadPoolExecutor(max_workers=settings.IMAGE_CONCURRENCY,
                                 thread_name_prefix="portrait") as pool:
             list(pool.map(_one, todo))
@@ -412,6 +433,8 @@ def generate_scene_image(gid: str, scene_id: str, prompt_override: str = "") -> 
 
 
 def _generate_scene_image(gid: str, scene_id: str, prompt_override: str = "") -> None:
+    if media.images_paused():
+        return    # quota window exhausted; the per-turn heal retries after it clears
     if _heal_exhausted(gid, "scene", scene_id):
         return    # this scene's art kept failing; stop re-rendering it every turn
     with db.get_conn() as conn:
@@ -443,20 +466,36 @@ def _generate_scene_image(gid: str, scene_id: str, prompt_override: str = "") ->
 
 def generate_creation_art(gid: str, scene_id: str) -> None:
     """The whole first-sight art pass, one background task (both creation routes call
-    this). Order is the owner's law: the art director writes the prompts, then
-    portraits render FIRST (they are the identity references), then the seeded item
-    cards, then the main opening image. Every stage degrades gracefully - a dead
-    director or a failed render never costs the later stages."""
+    this). Every stage degrades gracefully - a dead director or a failed render never
+    costs the later stages.
+
+    Two orders, one per stack. Local (unmetered GPU): portraits first (they are the
+    identity references), then item cards, then the main image. Anna: the host's
+    per-invoke image quota is a rolling window (default ~4 per 30min), so the pass
+    spends it on what the player actually sees first - the opening scene, then one
+    FACE per character (the avatars); front/side views and any items past the budget
+    arrive through the per-turn self-heal as the window clears. The main scene render
+    takes no identity references, so portraits-first is not load-bearing there."""
     direction = art_direction(gid) if settings.IMAGE_ART_DIRECTOR else None
+    if hostbridge.active():
+        generate_scene_image(gid, scene_id, prompt_override=(direction or {}).get("main_image", ""))
+        generate_images_for_game(gid, direction, views=("face",))
+        _creation_item_cards(gid)
+        return
     generate_images_for_game(gid, direction)
-    if settings.IMAGE_ITEMS:
-        # seeded possessions get their unlock card NOW: cards otherwise render only on
-        # the action route's new-item diff, and a turn-0 item is never "new" there
-        with db.get_conn() as conn:
-            if not repo.get_game(conn, gid):
-                return
-            seeded = [v["name"] for v in repo.visible_item_index(conn, gid).values()
-                      if not v.get("image_url")]
-        for name in seeded[: settings.IMAGE_MAX_ITEMS_PER_TURN]:
-            generate_item_image(gid, name)
+    _creation_item_cards(gid)
     generate_scene_image(gid, scene_id, prompt_override=(direction or {}).get("main_image", ""))
+
+
+def _creation_item_cards(gid: str) -> None:
+    if not settings.IMAGE_ITEMS:
+        return
+    # seeded possessions get their unlock card NOW: cards otherwise render only on
+    # the action route's new-item diff, and a turn-0 item is never "new" there
+    with db.get_conn() as conn:
+        if not repo.get_game(conn, gid):
+            return
+        seeded = [v["name"] for v in repo.visible_item_index(conn, gid).values()
+                  if not v.get("image_url")]
+    for name in seeded[: settings.IMAGE_MAX_ITEMS_PER_TURN]:
+        generate_item_image(gid, name)

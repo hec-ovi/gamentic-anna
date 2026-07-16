@@ -9,7 +9,7 @@ import { executeComposer, executePrivate, setComposerMode, stackSegment, unstack
 import { beginAdventure, clearCreatorSession, enterCreator, quickCreate, resetCreator, sendCreatorMessage } from "./creatorctl.js";
 import { root, state, storyNearBottom, torn, voice } from "./ctx.js";
 import { showHelp } from "./cues.js";
-import { exportGame, importGameFile, markArtReveals, openGame, refreshLibrary, removeGame, wipeEverything } from "./game.js";
+import { exportGame, importGameFile, markArtReveals, openGame, refreshLibrary, removeGame, toggleImages, wipeEverything } from "./game.js";
 import { stopMediaWatch } from "./mediastream.js";
 import { closeTagger, doExplain, doGive, onCharAction, openInspect, openTagger, takeSceneAction } from "./playctl.js";
 import { openProfile, switchProfileTab } from "./profilectl.js";
@@ -279,6 +279,9 @@ export function onAction(act, el) {
       break;
     case "retry-library":
       refreshLibrary();
+      break;
+    case "toggle-images":
+      toggleImages();
       break;
     case "continue-game":
       openGame(gameId);

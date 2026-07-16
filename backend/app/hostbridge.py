@@ -18,6 +18,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from .config import settings
+
 # Anna's executa-side sampling makes max_tokens mandatory and hard-caps it at 8192
 # tokens/call. We pass the maximum (never a smaller truncation ceiling) and shape
 # length through the prompt, per the project's no-output-cap rule; the field cannot
@@ -38,6 +40,19 @@ _RETRY_BACKOFF = (0.5, 1.5, 3.0)            # seconds before attempt 2, 3, ...
 _RETRYABLE_CODES = frozenset({-32000, -32003, -32046, -32103})
 _RETRYABLE_HINTS = ("502", "503", "504", "bad gateway", "gateway", "upstream",
                     "provider error", "provider_error")
+
+# Image-side host error codes the engine branches on (Anna reference, 2026-07):
+# quota is a rolling per-invoke window, so it clears on its own; the grant/provider
+# ones are deterministic per install and only the user can change them.
+IMG_QUOTA_CODES = frozenset({-32106, -32107})   # rolling window / per-call grant
+IMG_NOT_GRANTED = -32101
+IMG_NO_PROVIDER = -32109
+
+
+class ImageQuotaExhausted(RuntimeError):
+    """image/generate hit the host's per-invoke image quota (rolling window).
+    Not the asset's fault: callers pause ambient rendering instead of charging
+    the asset's heal allowance."""
 
 
 def _is_transient(exc: BaseException) -> bool:
@@ -151,24 +166,32 @@ def generate_image_sync(
     if ch is None:
         raise RuntimeError("no Anna host channel installed")
 
+    prefs = ({"hints": [{"name": settings.IMAGE_MODEL_HINT}]}
+             if settings.IMAGE_MODEL_HINT else None)
+
     def _make():
         return ch.image.generate(
             prompt=prompt,
             n=n,
             size=size,
             reference_image_urls=reference_image_urls or None,
+            model_preferences=prefs,
             timeout=timeout,
         )
 
     log = logging.getLogger("gamentic.image")
-    log.info("image/generate -> size=%s refs=%d prompt=%.80r", size,
-             len(reference_image_urls or []), prompt)
+    log.info("image/generate -> size=%s refs=%d hint=%s prompt=%.80r", size,
+             len(reference_image_urls or []), settings.IMAGE_MODEL_HINT or "-", prompt)
     try:
         result = _call_with_retry(_make, ch.loop, result_timeout=timeout + 15)
-    except Exception:
+    except Exception as exc:
+        if getattr(exc, "code", None) in IMG_QUOTA_CODES:
+            log.warning("image/generate quota exhausted (%s); ambient renders will pause",
+                        getattr(exc, "code", None))
+            raise ImageQuotaExhausted(str(exc)) from exc
         log.exception("image/generate FAILED")
         raise
-    log.info("image/generate <- keys=%s %.400r",
-             list((result or {}).keys()) if isinstance(result, dict) else type(result).__name__,
-             result)
+    log.info("image/generate <- model=%s quota=%s keys=%s",
+             (result or {}).get("model"), (result or {}).get("quota_used"),
+             list((result or {}).keys()) if isinstance(result, dict) else type(result).__name__)
     return result

@@ -4,6 +4,16 @@ from ..config import settings
 from . import characters, clock, games, items, players, quests, scenes
 
 
+def _images_on(conn) -> bool:
+    from .. import media   # function-level: media imports db; repo loads before it
+    return media.images_on(conn)
+
+
+def _images_status() -> str:
+    from .. import media
+    return media.images_status()
+
+
 def game_state(conn, gid: str) -> dict:
     g = games.get_game(conn, gid)
     p = players.get_player(conn, gid)
@@ -56,7 +66,11 @@ def game_state(conn, gid: str) -> dict:
                      "turn_voices": games.effective_turn_voices(g),
                      "turn_acts": games.effective_turn_acts(g)},
         "context": {"used": g["context_used"] or 0, "max": settings.LLM_CONTEXT_SIZE},
-        "images_enabled": settings.IMAGE_ENABLED,  # FE: if true and an image_url is null, show a loader
+        # FE: if enabled and an image_url is null, show a loader; images_status explains
+        # missing art (ok | paused_quota | not_granted | no_provider). Function-level
+        # import: media reads app_kv through db, repo must not import it at module load.
+        "images_enabled": _images_on(conn),
+        "images_status": _images_status(),
         "time": clock.game_time(conn, gid),        # fictional story clock {minutes, day, hour, part, label}
         "player": players.player_dict(p),
         "quests": quest_list,

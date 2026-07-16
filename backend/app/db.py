@@ -115,6 +115,11 @@ CREATE TABLE IF NOT EXISTS lore (
     discovered INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS app_kv (
+    key TEXT PRIMARY KEY,             -- install-wide durable state: the player-facing
+    value TEXT                        -- images switch, per-asset heal counters
+);
+
 CREATE TABLE IF NOT EXISTS beats (
     id TEXT PRIMARY KEY,
     game_id TEXT REFERENCES games(id),

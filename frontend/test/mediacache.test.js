@@ -1,6 +1,8 @@
-// Anna media cache: replies carry small /media refs; each resolves ONCE through
-// GET /media64 to a data: URI and is cached for the session. Outside Anna mode URLs
-// pass through untouched. While a fetch is in flight the widgets keep their loading
+// Anna media cache: replies carry small /media refs; each resolves ONCE through the
+// engine to a data: URI and is cached for the session. Requests raised in the same
+// render pass pool for a beat and travel as ONE POST /media64/batch (rejoining a
+// mature adventure used to fire one invoke per image). Outside Anna mode URLs pass
+// through untouched. While a fetch is in flight the widgets keep their loading
 // affordances (skeleton / initials), and a landed image triggers one batched repaint.
 
 import { test, expect, beforeEach, afterEach, vi } from "vitest";
@@ -24,7 +26,19 @@ afterEach(() => {
   resetMediaCache();
 });
 
-const flush = () => new Promise((r) => setTimeout(r, 20));
+// past the 25ms pooling window + the request round-trip
+const flush = () => new Promise((r) => setTimeout(r, 60));
+
+// one msw handler for the batch endpoint: `resolve` maps url -> uri|null
+function batchHandler(resolve, calls) {
+  return http.post(`${API}/media64/batch`, async ({ request }) => {
+    const body = await request.json();
+    calls.push(body.urls);
+    const uris = {};
+    for (const u of body.urls) uris[u] = resolve(u);
+    return HttpResponse.json({ uris });
+  });
+}
 
 test("outside Anna mode every URL passes through untouched", () => {
   state.annaMode = false;
@@ -38,14 +52,9 @@ test("non-/media URLs pass through even under Anna (data: URIs, remote fallbacks
   expect(resolveMediaUrl("https://cdn/x.png")).toBe("https://cdn/x.png");
 });
 
-test("a /media ref resolves once through /media64, then serves from the cache", async () => {
-  let hits = 0;
-  server.use(
-    http.get(`${API}/media64/g1/scene.png`, () => {
-      hits += 1;
-      return HttpResponse.json({ uri: URI });
-    }),
-  );
+test("a /media ref resolves once, then serves from the cache", async () => {
+  const calls = [];
+  server.use(batchHandler(() => URI, calls));
   const landed = vi.fn();
   onMediaReady(landed);
 
@@ -54,28 +63,60 @@ test("a /media ref resolves once through /media64, then serves from the cache", 
   expect(resolveMediaUrl("/media/g1/scene.png")).toBe(URI); // cached now
   resolveMediaUrl("/media/g1/scene.png");
   await flush();
-  expect(hits).toBe(1); // ONE network fetch, ever
+  expect(calls.length).toBe(1); // ONE network fetch, ever
   expect(landed).toHaveBeenCalledTimes(1); // one batched repaint
 });
 
+test("refs raised in the same render pass travel as ONE batch call", async () => {
+  const calls = [];
+  server.use(batchHandler(() => URI, calls));
+
+  resolveMediaUrl("/media/g1/scene.png");
+  resolveMediaUrl("/media/g1/char-1-face.png");
+  resolveMediaUrl("/media/g1/item-key.png");
+  await flush();
+
+  expect(calls.length).toBe(1); // pooled, not one call per image
+  expect(calls[0]).toEqual(expect.arrayContaining([
+    "/media/g1/scene.png", "/media/g1/char-1-face.png", "/media/g1/item-key.png"]));
+  expect(resolveMediaUrl("/media/g1/scene.png")).toBe(URI);
+  expect(resolveMediaUrl("/media/g1/char-1-face.png")).toBe(URI);
+  expect(resolveMediaUrl("/media/g1/item-key.png")).toBe(URI);
+});
+
 test("a missing file stops asking after its retries and settles on the no-image fallback", async () => {
-  let hits = 0;
-  server.use(
-    http.get(`${API}/media64/g1/gone.png`, () => {
-      hits += 1;
-      return HttpResponse.json({ detail: "not found" }, { status: 404 });
-    }),
-  );
+  const calls = [];
+  server.use(batchHandler(() => null, calls)); // the engine answers: no such file
   for (let i = 0; i < 5; i++) {
     resolveMediaUrl("/media/g1/gone.png");
     await flush();
   }
-  expect(hits).toBeLessThanOrEqual(3); // bounded attempts
+  expect(calls.length).toBeLessThanOrEqual(3); // bounded attempts
   expect(resolveMediaUrl("/media/g1/gone.png")).toBe(""); // '' = give up, render fallback
 });
 
+test("a transport blip never poisons the cache: the next render retries", async () => {
+  let fail = true;
+  const calls = [];
+  server.use(http.post(`${API}/media64/batch`, async ({ request }) => {
+    calls.push((await request.json()).urls);
+    if (fail) return HttpResponse.error();
+    return HttpResponse.json({ uris: { "/media/g1/late.png": URI } });
+  }));
+
+  resolveMediaUrl("/media/g1/late.png");
+  await flush();
+  expect(resolveMediaUrl("/media/g1/late.png")).toBe(null); // not cached as failed
+
+  fail = false;
+  resolveMediaUrl("/media/g1/late.png");
+  await flush();
+  expect(resolveMediaUrl("/media/g1/late.png")).toBe(URI);
+});
+
 test("widgets hold their loading/initials affordances while a ref is in flight", async () => {
-  server.use(http.get(`${API}/media64/g1/x.png`, () => HttpResponse.json({ uri: URI })));
+  const calls = [];
+  server.use(batchHandler(() => URI, calls));
 
   // artImg: skeleton first (stable data-art identity), the real img once cached
   const pendingArt = artImg({ url: "/media/g1/x.png", alt: "The scene" });

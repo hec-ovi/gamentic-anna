@@ -24,12 +24,24 @@ from .base import ProviderConfig, fal_queue_run
 
 # View prompts for the cloud character_set path. The comfy unit owns its own
 # 3-view prompting server-side; these only exist for providers without it.
-_FACE_VIEW = ("head and shoulders portrait of {d}, facing the viewer, "
-              "neutral plain background")
-_FRONT_VIEW = ("full body shot of {d}, standing, front view, whole figure visible "
-               "head to feet, neutral plain background")
-_SIDE_VIEW = ("full body shot of {d}, standing, side profile view, whole figure "
-              "visible head to feet, neutral plain background")
+# Phrased as a character REFERENCE SHEET shot: hosted providers (whatever the Anna
+# host routes to) ignore reference images and have no negative prompts, so the
+# framing, the empty studio backdrop and the single-subject constraint must all be
+# said outright or the model invents a scene around the character (live: portraits
+# came back mid-scene, with backgrounds, and the side view refused to be a profile).
+_FACE_VIEW = ("character reference sheet, close-up head-and-shoulders portrait of {d}. "
+              "Facing the camera directly, neutral expression, plain solid light-grey "
+              "studio backdrop, even soft studio lighting, single character only, "
+              "nothing else in frame")
+_FRONT_VIEW = ("character reference sheet, full-body shot of {d}. Standing upright in "
+               "a relaxed neutral pose, arms at the sides, facing the camera, the "
+               "entire figure visible from head to toe, plain solid light-grey studio "
+               "backdrop, even soft studio lighting, single character only, nothing "
+               "else in frame")
+_SIDE_VIEW = ("character reference sheet, full-body shot of {d}. Standing upright in "
+              "strict side profile facing left, the entire figure visible from head "
+              "to toe, plain solid light-grey studio backdrop, even soft studio "
+              "lighting, single character only, nothing else in frame")
 _FACE_SIZE = (1024, 1024)
 _BODY_SIZE = (1024, 1536)
 _VIEW_SPECS = {"face": (_FACE_VIEW, _FACE_SIZE),

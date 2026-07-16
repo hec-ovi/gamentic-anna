@@ -94,6 +94,7 @@ export function mapGameState(state = {}) {
     context: mapContext(state.context),
     // true + null image_url = art still generating (loader); false = images off (static placeholder)
     imagesEnabled: Boolean(state.images_enabled),
+    imagesStatus: state.images_status || "ok", // ok | paused_quota | not_granted | no_provider
     // fictional story clock; render `label` in the header
     time: mapTime(state.time),
     scene: mapScene(state.scene),

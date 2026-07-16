@@ -209,7 +209,7 @@ def test_character_set_reference_path_when_supported(monkeypatch):
     assert len(calls) == 3
     face_parts = calls[0]["contents"][0]["parts"]
     assert len(face_parts) == 1 and "portrait" in face_parts[0]["text"]
-    for body_call, view in ((calls[1], "front view"), (calls[2], "side profile")):
+    for body_call, view in ((calls[1], "facing the camera"), (calls[2], "side profile")):
         parts = body_call["contents"][0]["parts"]
         assert view in parts[0]["text"] and "oil painting" in parts[0]["text"]
         assert parts[1]["inline_data"]["data"] == "QUJD"       # the face conditions the body

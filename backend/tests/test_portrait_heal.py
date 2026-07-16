@@ -149,8 +149,9 @@ def test_failing_set_stops_re_rendering_after_the_attempt_ceiling(client, fake_l
     _setup(monkeypatch, tmp_path)
     monkeypatch.setattr(settings, "IMAGE_HEAL_MAX_ATTEMPTS", 3)
     gid = client.post("/games", json=WORLD).json()["game_id"]
-    from app.integrate import jobs
-    jobs._heal_attempts.clear()      # creation's (stubbed, failing) pass burned one
+    from app import db as adb, repo as arepo
+    with adb.get_conn() as conn:     # creation's (stubbed, failing) pass burned one
+        arepo.kv_delete_prefix(conn, "heal:")
     passes = []
     monkeypatch.setattr(media, "generate_character_images",
                         lambda d, style="", seed=None: passes.append(d) or None)

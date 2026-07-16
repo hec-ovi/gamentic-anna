@@ -128,6 +128,12 @@ export function createApi(backendUrl, { invoke = null } = {}) {
     // '/media/<gid>/<name>' -> { uri: 'data:image/jpeg;base64,...' } (Anna mode: the
     // iframe cannot fetch /media directly; mediacache.js calls this once per image)
     media64: (mediaUrl) => request(`/media64${String(mediaUrl).replace(/^\/media/, "")}`),
+    // several refs in ONE round-trip: { uris: { url: dataUriOrNull } } (rejoining a
+    // mature adventure resolves its whole backlog in a couple of calls, not one each)
+    media64Batch: (urls) => request("/media64/batch", { method: "POST", body: { urls } }),
+    // install-wide settings: the player-facing images switch + render health
+    appSettings: () => request("/settings/app"),
+    patchAppSettings: (payload) => request("/settings/app", { method: "PATCH", body: payload }),
     importGame: (payload) => request("/games/import", { method: "POST", body: payload, timeout: IMPORT_TIMEOUT_MS }),
     deleteGame: (id) => request(`/games/${encodeURIComponent(id)}`, { method: "DELETE" }),
     wipeAll: () => request("/games?confirm=wipe", { method: "DELETE" }),
