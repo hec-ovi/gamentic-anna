@@ -1,36 +1,46 @@
-# Anna local Agent (the executa runtime)
+# Run the Anna local Agent (Docker)
 
-The **published** gamentic-anna app runs its engine as an Anna **Tool Executa** (a real
-process: the FastAPI engine binary + SQLite). A Tool executa only runs **where the Anna
-Agent runtime is installed**, and the **anna.partners web app has no executa runtime** of
-its own. So when you open the published app in the browser you get:
+The published gamentic-anna app runs its engine as an Anna Tool Executa, and a Tool
+Executa only runs where the Anna Agent runtime is installed. The anna.partners web app
+has no executa runtime of its own, so without a running Agent the app reports
+"No online Agent". This folder containerizes that Agent.
 
-> No online Agent. Start your local Agent first, then try again.
+The current Anna Linux build is a FastAPI web app on port 19001 (not a GUI), so no
+Xvfb or display is needed. You sign in through its web UI and it registers as your
+online Agent.
 
-The fix is to run Anna's **local Agent** (the desktop "executor"). This folder holds a
-helper to fetch and launch it. You do NOT need this for the `localhost:5180` dev harness,
-which already runs the engine itself.
+Prereq: download the Anna Linux build from https://anna.partners/download while logged
+in, and place it in this folder as `anna-agent.tar.gz` (gitignored).
 
-## Use it
+## Build and run
 
-1. Get the Linux agent from **https://anna.partners/download** (a `tar.gz`). Either drop
-   the `Anna-*.tar.gz` in this folder, or pass its URL to the script.
-2. Run it:
-   ```sh
-   ./run-agent.sh                 # uses an Anna-*.tar.gz already in this folder
-   ./run-agent.sh <download-url>  # or download it first
-   ```
-3. Sign in with the **same Anna account** (hecovi). The Hub then shows an online Agent.
-4. In the Executa Hub, open the **Gamentic** tool and click **Install**. The Agent pulls
-   `gamentic-executa-linux-x86_64.tar.gz` (from the GitHub Release) and runs it locally.
-5. Open gamentic-anna. It connects (no more "LINK LOST" / "no online Agent").
+```sh
+cd anna-agent
+docker build -t anna-agent .
+docker run --name anna-agent -p 127.0.0.1:19001:19001 anna-agent
+```
 
-## Notes
+Runs in the foreground, so Ctrl+C stops it; no `--rm`, so the login is kept.
 
-- The Agent is a desktop (Electron-style) app. On a desktop with a display, `./Anna` just
-  runs. On a headless box the script falls back to `xvfb-run` (install `xvfb` first); that
-  path is unsupported by Anna and only for servers.
-- The engine binary is **linux-x86_64** only right now (matches this machine). Other
-  platforms need the macOS/Windows builds from the `executa-release` GitHub workflow.
-- End users of the published app need this same local Agent to play. That is inherent to a
-  Tool executa being a real process, not a limitation of this app.
+Then open http://localhost:19001, click Login, and sign in. "Agent Offline" flips to
+online once it has a client_id. Optional check:
+
+```sh
+curl -s http://localhost:19001/api/agent/status   # want "connected":true and a non-empty client_id
+```
+
+With the Agent online, Install Essentials on it (Anna: More, then Agents) pulls the
+engine from PyPI via `uv tool install` and the app comes alive.
+
+## Lifecycle
+
+| Action | Command / result |
+|---|---|
+| Stop | Ctrl+C in the terminal (graceful shutdown), or `docker stop anna-agent` |
+| Start again, same login | `docker start -a anna-agent` |
+| Reboot PC | Stays stopped, nothing auto-starts (no restart policy set) |
+| Remove for good | `docker rm -f anna-agent` (only this wipes the login) |
+
+Login survives Ctrl+C and stop/start because the container keeps its writable layer.
+Only `docker rm` throws it away. Nothing is installed on your host; the Anna binary
+only ever runs inside the container.

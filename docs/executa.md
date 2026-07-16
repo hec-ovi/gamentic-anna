@@ -34,16 +34,17 @@ bundled model, no third-party keys):
 
 ## Build and publish
 
+See [docs/RELEASE.md](RELEASE.md) for the full checklist. Short form:
+
 ```sh
 cd backend
-uv build                     # -> dist/tool_gamentic_engine_7h8aweky-<version>-py3-none-any.whl
-# upload to PyPI, then:
-anna-app executa publish     # mint or update the executa (reads executa.json)
+uv build                              # -> dist/tool_gamentic_engine_7h8aweky-<version>-py3-none-any.whl
+uv publish --token "$PYPI_TOKEN" dist/*<version>*
+npx -y @anna-ai/cli executa publish   # mint or update the executa (reads executa.json)
 ```
 
 Keep `[project].version` (pyproject), `VERSION` (app/executa.py) and the manifests in
-lockstep. `backend/packaging/build-binary.sh` is the legacy PyInstaller path, kept only
-for reference.
+lockstep; `backend/tests/test_executa_packaging.py` guards the sync.
 
 See the [repo README](https://github.com/hec-ovi/gamentic-anna#readme) for the full app,
 architecture, and run instructions.

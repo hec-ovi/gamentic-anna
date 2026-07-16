@@ -75,7 +75,7 @@ export function createApi(backendUrl, { invoke = null } = {}) {
     return { status: response.status, json: await readBody(response), ok: response.ok, statusText: response.statusText };
   }
 
-  // The Anna dev harness recycles the executa on its own; an invoke in flight when it
+  // The Anna agent runtime recycles the executa on its own; an invoke in flight when it
   // happens is dropped (surfaces as a transport-level ApiError: status 0 from the hang,
   // or 502 from a success:false envelope). GETs are idempotent, so retry them a few times
   // with a short backoff before giving up - this is what keeps resume from bouncing you to

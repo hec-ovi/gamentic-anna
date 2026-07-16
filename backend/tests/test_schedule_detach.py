@@ -1,6 +1,6 @@
 """Post-turn jobs (art renders, summary folds, origin enrichment) routing.
 
-The Anna dev harness hard-caps a tool invoke at ~65s and RESTARTS the executa on
+The Anna agent runtime hard-caps a tool invoke at ~65s and RESTARTS the executa on
 timeout, but an image render takes 35-90s and origin enrichment is several LLM calls.
 So as an Executa, main._schedule runs jobs DETACHED (on a background pool), never on the
 invoke thread: the invoke returns immediately and the job finishes after, with the

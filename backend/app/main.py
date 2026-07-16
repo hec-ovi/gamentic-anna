@@ -44,7 +44,7 @@ app.add_middleware(
 # Outside an Anna Executa they run as Starlette BackgroundTasks (after the response under
 # uvicorn - what every test exercises).
 #
-# Inside an Executa they run DETACHED. The Anna dev harness hard-caps a tool invoke at
+# Inside an Executa they run DETACHED. The Anna agent runtime hard-caps a tool invoke at
 # ~65s and RESTARTS the executa when it's exceeded, but image renders take 35-90s EACH.
 # Blocking the invoke on renders therefore times out the call, restarts the executa, and
 # breaks resume/turns. So the invoke returns immediately and renders continue on this

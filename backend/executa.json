@@ -1,5 +1,5 @@
 {
-  "_comment": "Anna Executa descriptor for the gamentic engine. The comms layer is app/executa.py (stdio JSON-RPC bridge over the unchanged FastAPI app). `anna-app dev` discovers this and spawns `command` (cwd = this dir); `anna-app executa publish` reads slug/name/version/distribution and mints the real tool_id.",
+  "_comment": "Anna Executa descriptor for the gamentic engine. The comms layer is app/executa.py (stdio JSON-RPC bridge over the unchanged FastAPI app). `anna-app executa publish` reads slug/name/version/distribution and mints/updates the tool (identity pinned by .anna/executa.json).",
   "slug": "engine",
   "name": "Gamentic",
   "version": "0.2.8",

@@ -1,9 +1,7 @@
 """Anna mode: one boolean (env ANNA) that retargets text and image at the Anna
 gateway (the in-stack anna-api adapter by default) and silences voice. Expansion,
 not restriction: with the boolean off, resolution is byte-identical to the local
-stack. The compose side (GPU services profiled out under ANNA=true) is pinned by
-the .env COMPOSE_PROFILES constant and verified by hand with `docker compose
-config --services`; here we pin the app side end-to-end through the real paths."""
+stack. Here we pin the app side end-to-end through the real paths."""
 from app import llm, media
 from app.config import settings
 from app.providers import base as pbase

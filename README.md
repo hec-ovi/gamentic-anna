@@ -92,7 +92,7 @@ Resume is resilient to the harness recycling the executa: idempotent reads (stat
 └─────────────────────────────────────────────┘
 ```
 
-Top to bottom is the call path: the iframe UI invokes the Executa, which runs the engine in-process, which reverse-RPCs the Anna host for every token (and image). One container; the original Gamentic engine and UI are kept intact, only the comms layers swap to Anna's own.
+Top to bottom is the call path: the iframe UI invokes the Executa, which runs the engine in-process, which reverse-RPCs the Anna host for every token (and image). The original Gamentic engine and UI are kept intact, only the comms layers swap to Anna's own.
 
 - **Backend** (`backend/app/executa.py`): the FastAPI engine wrapped as a stdio Executa. Each invoke replays an HTTP-style call against the in-process app (httpx ASGI transport), so every route, its validation and its behavior are exactly what uvicorn serves.
 - **Reverse-RPC** (`backend/app/hostbridge.py`): for text, images and reference uploads the engine calls the Anna host directly (`sampling/createMessage`, `image/generate`, `host/uploadFile`) via the vendored `executa_sdk`, with bounded retries on transient gateway errors.
@@ -100,18 +100,14 @@ Top to bottom is the call path: the iframe UI invokes the Executa, which runs th
 - **Media delivery**: every image persists under `/media/<game>/` and replies carry only that small ref; the sandboxed iframe resolves each ref once through `GET /media64/{gid}/{name}` (a downscaled data URI, mtime-cached server-side, cached in a Map browser-side).
 - **Tool calls** (`backend/app/llm.py`): Anna sampling has no OpenAI-style function calling but does structured JSON, so the engine asks for a `{prose, tool_calls}` envelope and parses it back with a tolerant local repair (no network round-trip).
 - **Frontend** (`frontend/src/app/anna.js`): the UI runs in Anna's sandboxed iframe and routes through the injected transport; standalone dev falls back to `fetch`.
-- **Storage**: embedded SQLite on a Docker volume. Voice is off (Anna has no TTS).
+- **Storage**: embedded SQLite under the Agent-provided `EXECUTA_DATA` dir, one per install. Voice is off (Anna has no TTS).
 
-## 📦 Run it locally (dev harness)
+## 🚢 Develop and ship
 
-One container runs `anna-app dev` (Anna's own dev runtime): it serves the iframe and spawns the Executa.
-
-```sh
-docker compose up -d --build
-docker exec -it gamentic-anna anna-app login --host https://anna.partners --no-browser   # device-code, once
-```
-
-Then open **http://localhost:5180** and play. Full teardown (login + saved games): `docker compose down -v`.
+There is no local preview. Every change ships to Anna: build the wheel, publish to
+PyPI, update the Executa and the App on the Anna console, then play it through your
+local Agent. The whole checklist is [docs/RELEASE.md](docs/RELEASE.md); running the
+Agent in Docker is [anna-agent/README.md](anna-agent/README.md).
 
 > 🔑 **Pick a model.** Anna serves whatever model your account selects (LLM / Model Selection). Self-hosted models see more gateway (502) hiccups and ship smaller context; a Pro-tier (OpenRouter-backed) model gives steadier responses and far more context.
 
@@ -119,16 +115,17 @@ Then open **http://localhost:5180** and play. Full teardown (login + saved games
 
 ```
 backend/
-  app/executa.py     the Anna Executa: stdio JSON-RPC + reverse-RPC to the host
-  app/hostbridge.py  the sync engine -> host bridge (sampling, image)
-  app/main.py        the FastAPI engine + the detached post-response job pool
-  app/llm.py         chat(): native sampling + the {prose, tool_calls} envelope
-  executa.json       executa descriptor (tool_id, command, host_capabilities)
-  executa_sdk/       vendored Anna executa SDK (SamplingClient, ImageClient, ...)
-frontend/            Gamentic UI; src/api.js + src/app/anna.js carry the Anna transport
-infra/Dockerfile     the single image: node + anna-app + the engine venv
-manifest.json        the Anna App manifest (iframe view, required executa, host-API grants)
-docker-compose.yml
+  app/executa.py         the Anna Executa: stdio JSON-RPC + reverse-RPC to the host
+  app/hostbridge.py      the sync engine -> host bridge (sampling, image, upload)
+  app/main.py            the FastAPI engine + the detached post-response job pool
+  app/llm.py             chat(): native sampling + the {prose, tool_calls} envelope
+  executa.json           executa descriptor (tool_id, command, host_capabilities)
+  executa_sdk/           vendored Anna executa SDK (SamplingClient, ImageClient, ...)
+frontend/                Gamentic UI; src/api.js + src/app/anna.js carry the Anna transport
+manifest.publish.json    the Anna App manifest (iframe view, required executa, host-API grants)
+executa-manifest.json    the describe manifest pasted into the Anna console
+anna-agent/              Docker setup for the Anna local Agent (the executa runtime)
+docs/RELEASE.md          the ship-a-release checklist
 ```
 
 ## 🧪 Tests
@@ -151,4 +148,4 @@ cd backend && uv venv && uv pip install -e . pytest && .venv/bin/python -m pytes
 - **Keep slow work off the invoke.** The manifest raises the per-invoke timeout to 600s, but the reverse-RPC token dies about 600s after its invoke too, so anything slow (renders above all) runs detached and concurrently; the per-turn self-heal picks up whatever a dead token dropped.
 - **Token budget:** Anna's executa-side sampling makes `max_tokens` mandatory and caps it at 8192; the engine always passes the maximum and shapes length through the prompt, never a truncating ceiling.
 - **Images:** generated images come back as short-lived host URLs; the engine persists each per game under `/media`, and the iframe pulls each one once via `GET /media64` (see Architecture). Identity references (a character's stored view) upload to the host via `host/uploadFile` because the host can only fetch references over HTTPS.
-- **Publishing:** the Executa is published to Anna's Executa Hub and referenced by `tool_id`; on Install Essentials the user's Agent runs `uv tool install <package>==<version>` from **PyPI** (`backend/pyproject.toml` builds the wheel; one `py3-none-any` artifact plus uv-resolved dependency wheels cover every platform). A wheel URL does not work here because the Agent always appends `==<version>`, which only a package name (not a URL) resolves. This repo is the dev/run setup for that app.
+- **Publishing:** the Executa is published to Anna's Executa Hub and referenced by `tool_id`; on Install Essentials the user's Agent runs `uv tool install <package>==<version>` from **PyPI** (`backend/pyproject.toml` builds the wheel; one `py3-none-any` artifact plus uv-resolved dependency wheels cover every platform). A wheel URL does not work here because the Agent always appends `==<version>`, which only a package name (not a URL) resolves. Release checklist: [docs/RELEASE.md](docs/RELEASE.md).

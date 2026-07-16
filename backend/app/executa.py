@@ -143,7 +143,7 @@ def _warm() -> None:
     Anna for LLM/images for the rest of the process's life."""
     # ASGITransport skips the app's lifespan, so the engine's loggers are never
     # configured and image/summary failures render invisibly. Configure here (to stderr,
-    # which the dev harness surfaces) so detached job errors and engine logs are visible.
+    # which the agent runtime surfaces) so detached job errors and engine logs are visible.
     logging.basicConfig(level=logging.INFO, stream=sys.stderr)
     _ensure_client()
     hostbridge.set_channel(hostbridge.HostChannel(loop=_loop, sampling=_sampling,

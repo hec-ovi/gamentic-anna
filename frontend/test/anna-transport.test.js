@@ -76,7 +76,7 @@ describe("anna executa transport", () => {
     expect(err.message).toMatch(/usage limit/i);
   });
 
-  // The Anna dev harness recycles the executa on its own; an idempotent GET caught mid-recycle
+  // The Anna agent runtime recycles the executa on its own; an idempotent GET caught mid-recycle
   // (a dropped invoke -> tool-level 502, or a transport hang -> status 0) must be retried, not
   // bounced. This is what keeps resume from kicking the player back to the menu.
   it("retries a GET through a dropped invoke (executa recycle) and then succeeds", async () => {
