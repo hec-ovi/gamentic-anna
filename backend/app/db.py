@@ -247,6 +247,31 @@ def _migrate(conn) -> None:
         for col, decl in cols.items():
             if col not in have:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
+    _migrate_beat_coordinates(conn)
+
+
+def _migrate_beat_coordinates(conn) -> None:
+    """The transcript's order is (turn_index, seq), but background render jobs used to
+    allocate those coordinates with a separate read-then-insert - two jobs racing the
+    turn counter could land at the SAME coordinates, and the tiebreak (rowid) need not
+    match the order the player saw, so their own whisper re-sorted on reload. Repair
+    any existing collisions (re-sequence each (game, turn) group by rowid, which
+    preserves insertion order), then pin uniqueness so they cannot come back;
+    add_beat now allocates seq inside the INSERT itself (atomic per statement)."""
+    dup = conn.execute(
+        "SELECT 1 FROM beats GROUP BY game_id, turn_index, seq HAVING COUNT(*) > 1 LIMIT 1"
+    ).fetchone()
+    if dup:
+        conn.execute("""
+            UPDATE beats SET seq = (
+              SELECT COUNT(*) FROM beats b2
+              WHERE b2.game_id = beats.game_id AND b2.turn_index = beats.turn_index
+                AND b2.rowid < beats.rowid)
+            WHERE (game_id, turn_index) IN (
+              SELECT game_id, turn_index FROM beats
+              GROUP BY game_id, turn_index, seq HAVING COUNT(*) > 1)""")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_beats_coord "
+                 "ON beats(game_id, turn_index, seq)")
 
 
 def init_db() -> None:

@@ -1,7 +1,7 @@
 // The turn loop: action/continue resolution, the optimistic player echo, the
 // wish line, failure restore, and the post-turn late-image-beat watch.
 
-import { mapBeats, mapGameState } from "../adapters.js";
+import { mapBeats, mapGameState, mergeBeats } from "../adapters.js";
 import { diffState } from "../transitions.js";
 import { api, root, state } from "./ctx.js";
 import { applyTransitions, showToast } from "./cues.js";
@@ -127,7 +127,7 @@ export function captureWish(g) {
 export async function resolveTurn(g, send, { look = false, echo = null, restore = null, wish = null, via = null } = {}) {
   g.generating = true;
   g.skipReveal = true; // fast-forward any reveal still running from last turn
-  if (echo && echo.length) g.beats = [...g.beats, ...echo];
+  if (echo && echo.length) g.beats = mergeBeats(g.beats, echo); // pending pins last
   render();
   let failed = false;
 
@@ -141,7 +141,9 @@ export async function resolveTurn(g, send, { look = false, echo = null, restore 
     const newBeats = mapBeats(turn.beats || [])
       .filter((b) => !seen.has(b.id))
       .map((b) => (via ? { ...withVoice(b), viaProfile: via } : withVoice(b)));
-    g.beats = [...g.beats, ...newBeats];
+    // merge by ordinal, not append: a late image beat from the PREVIOUS turn may
+    // still be arriving, and the whisper thread renders array order
+    g.beats = mergeBeats(g.beats, newBeats);
     g.lastVia = via; // late image beats from this turn mirror to the same panel
     g.lastTurnIndex = lastTurnIndexOf(g.beats, g.lastTurnIndex);
     g.revealQueue = newBeats.map((b) => b.id); // staged reveal, in seq order

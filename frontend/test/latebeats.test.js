@@ -44,6 +44,28 @@ test("the poll asks one turn behind the high-water mark", async () => {
   expect(since).toBe("4"); // lastTurnIndex 5 -> since=4 (exclusive query = fetch >= 5)
 });
 
+test("a late beat slots into ITS transcript position, not the tail (the whisper misorder)", async () => {
+  // the player's whisper + the reply are already at turn 6; a background private
+  // image from turn 5 arrives AFTER them via the poll. It must render BEFORE the
+  // turn-6 exchange (array order is render order), and a pending echo stays last.
+  const late = makeBeat({
+    id: "b-late", turn_index: 5, seq: 3, kind: "image",
+    image_url: "/media/g-test/view-t5.png", text: "A quiet study", private_with: "c1",
+  });
+  server.use(http.get(`${API}/games/:id/beats`, () => HttpResponse.json({ beats: [late] })));
+  const g = game({
+    lastTurnIndex: 6,
+    beats: [
+      { id: "b-w", turnIndex: 6, seq: 0, kind: "action", speaker: "player", privateWith: "c1", text: "psst" },
+      { id: "b-r", turnIndex: 6, seq: 1, kind: "dialogue", privateWith: "c1", text: "yes?" },
+      { id: "pending-1", turnIndex: null, seq: 0, kind: "action", speaker: "player", pending: true, text: "and..." },
+    ],
+  });
+  state.active = g;
+  await pullBeats(g);
+  expect(g.beats.map((b) => b.id)).toEqual(["b-late", "b-w", "b-r", "pending-1"]);
+});
+
 test("an image beat landing at an already-fetched turn_index still arrives, deduped by id", async () => {
   const known = makeBeat({ id: "b-known", turn_index: 5, text: "You look around." });
   const late = makeBeat({

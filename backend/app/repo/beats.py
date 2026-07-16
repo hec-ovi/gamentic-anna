@@ -25,18 +25,20 @@ def add_beat(conn, gid, speaker, speaker_name, kind, text, location,
              emotion="") -> dict:
     if turn_index is None:
         turn_index = next_turn_index(conn, gid)
-    if seq is None:
-        row = conn.execute(
-            "SELECT COALESCE(MAX(seq), -1) AS s FROM beats WHERE game_id=? AND turn_index=?",
-            (gid, turn_index)).fetchone()
-        seq = row["s"] + 1
     bid = _id()
     witnesses = json.dumps(_witnesses(conn, gid, location, private_with))
-    conn.execute(
+    # seq allocates INSIDE the insert (one atomic statement): a background render job
+    # and a turn used to read MAX(seq) separately and could land two beats at the same
+    # coordinates, which re-sorted the transcript on reload (rowid broke the tie).
+    # idx_beats_coord (UNIQUE) backstops it.
+    row = conn.execute(
         "INSERT INTO beats (id, game_id, turn_index, seq, speaker, speaker_name, kind, text, location, private_with, image_url, emotion, witnesses) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-        (bid, gid, turn_index, seq, speaker, speaker_name, kind, text, location, private_with, image_url, emotion or "", witnesses),
-    )
+        "VALUES (?,?,?, COALESCE(?, (SELECT COALESCE(MAX(seq), -1)+1 FROM beats WHERE game_id=? AND turn_index=?)),"
+        "?,?,?,?,?,?,?,?,?) RETURNING seq",
+        (bid, gid, turn_index, seq, gid, turn_index,
+         speaker, speaker_name, kind, text, location, private_with, image_url, emotion or "", witnesses),
+    ).fetchone()
+    seq = row["seq"]
     return {"id": bid, "turn_index": turn_index, "seq": seq, "speaker": speaker,
             "speaker_name": speaker_name, "kind": kind, "text": text, "location": location,
             "image_url": image_url, "audio_url": None, "private_with": private_with,

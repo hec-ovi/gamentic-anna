@@ -11,7 +11,7 @@
 // for proxies that break SSE - it is the only path when EventSource is
 // missing entirely (old embedders, jsdom).
 
-import { mapBeats, mapGameState } from "../adapters.js";
+import { mapBeats, mapGameState, mergeBeats } from "../adapters.js";
 import { api, root, state } from "./ctx.js";
 import { announceImage, startReveal } from "./reveal.js";
 import { withVoice } from "./speech.js";
@@ -154,12 +154,13 @@ export async function pullBeats(g) {
       .filter((b) => !seen.has(b.id))
       .map((b) => withVoice(b));
     if (!fresh.length) return;
-    g.beats = [...g.beats, ...fresh];
-    g.lastTurnIndex = lastTurnIndexOf(g.beats, g.lastTurnIndex);
-    if (fresh.some((b) => b.kind === "image" && b.speaker !== "system")) g.pendingView = false;
     // a panel-launched look's image lands here, seconds later: mirror it
     const tagged = g.lastVia ? fresh.map((b) => (b.kind === "image" ? { ...b, viaProfile: g.lastVia } : b)) : fresh;
-    if (g.lastVia) g.beats = [...g.beats.filter((b) => !tagged.some((t) => t.id === b.id)), ...tagged];
+    // merge by ordinal, never append: a late beat belongs at ITS place in the
+    // transcript (the player's own whisper used to end up above/below it wrongly)
+    g.beats = mergeBeats(g.beats, tagged);
+    g.lastTurnIndex = lastTurnIndexOf(g.beats, g.lastTurnIndex);
+    if (fresh.some((b) => b.kind === "image" && b.speaker !== "system")) g.pendingView = false;
     if (state.view === "play") {
       g.revealQueue = [...(g.revealQueue || []), ...fresh.map((b) => b.id)];
       render();

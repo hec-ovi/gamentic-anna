@@ -295,6 +295,30 @@ export function beatOrdinal(beat) {
   return beat.turnIndex * 100000 + (Number(beat.seq) || 0);
 }
 
+// THE one ordering authority for g.beats. Every mutation (turn result, late-beat
+// poll) merges through here: dedup by id (first copy wins - it may carry local
+// tags like viaProfile), then a stable sort by ordinal with pending optimistic
+// echoes pinned LAST (they are "being sent right now", newer than anything
+// fetched). Renders trust array order, so a late-arriving beat (a background
+// image landing at an older turn, a re-poll one turn behind) slots into place
+// instead of dangling at the tail - the whisper-thread misorder.
+export function mergeBeats(existing, fresh) {
+  const seen = new Set();
+  const all = [];
+  for (const b of [...(existing || []), ...(fresh || [])]) {
+    if (!b || seen.has(b.id)) continue;
+    seen.add(b.id);
+    all.push(b);
+  }
+  return all.sort((a, b) => {
+    const pa = a.pending ? 1 : 0;
+    const pb = b.pending ? 1 : 0;
+    if (pa !== pb) return pa - pb;                    // pending after everything real
+    if (pa) return 0;                                 // pending stay in send order
+    return beatOrdinal(a) - beatOrdinal(b);           // stable: ties keep arrival order
+  });
+}
+
 // The private beats a CHARACTER has spoken to the player (their dialogue /
 // narration / actions in the 1:1 thread) - never the player's own echoes and
 // never pending optimistic lines. These are what "unread" is measured against.
