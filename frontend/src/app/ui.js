@@ -9,7 +9,7 @@ import { executeComposer, executePrivate, setComposerMode, stackSegment, unstack
 import { beginAdventure, clearCreatorSession, enterCreator, quickCreate, resetCreator, sendCreatorMessage } from "./creatorctl.js";
 import { root, state, storyNearBottom, torn, voice } from "./ctx.js";
 import { showHelp } from "./cues.js";
-import { exportGame, importGameFile, markArtReveals, openGame, refreshLibrary, removeGame, toggleImages, wipeEverything } from "./game.js";
+import { copyExportJson, exportGame, importGameFile, importPastedJson, markArtReveals, openGame, refreshLibrary, removeGame, toggleImages, wipeEverything } from "./game.js";
 import { stopMediaWatch } from "./mediastream.js";
 import { closeTagger, doExplain, doGive, onCharAction, openInspect, openTagger, takeSceneAction } from "./playctl.js";
 import { openProfile, switchProfileTab } from "./profilectl.js";
@@ -407,7 +407,27 @@ export function onAction(act, el) {
       }
       break;
     case "import-game":
-      root.querySelector("#importFile")?.click();
+      if (state.annaMode) {
+        // the sandboxed iframe cannot reliably open a file picker: paste instead
+        state.importView = { text: "", error: "" };
+        render();
+      } else {
+        root.querySelector("#importFile")?.click();
+      }
+      break;
+    case "confirm-import":
+      importPastedJson();
+      break;
+    case "close-import-view":
+      state.importView = null;
+      render();
+      break;
+    case "copy-export":
+      copyExportJson();
+      break;
+    case "close-export-view":
+      state.exportView = null;
+      render();
       break;
     case "cmp-mode":
       setComposerMode(state.active && state.active.composer, "cmp", el.dataset.mode);

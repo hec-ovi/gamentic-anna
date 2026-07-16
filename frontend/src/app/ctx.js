@@ -33,6 +33,8 @@ export const state = {
   appImages: null, // { enabled, status } from GET /settings/app (the library's images switch)
   confirm: null, // { gameId, title } when a delete confirmation is open
   exportChoice: null, // { gameId, title } when a card's export choice (share/save) is open
+  exportView: null, // { title, kind, filename, json } - the Anna-mode export modal (copy/data-link)
+  importView: null, // { text, error } - the Anna-mode paste-import modal
   wipe: null, // { stage: 1|2, busy } when the wipe-all double confirm is open
   settings: loadSettings(),
 };

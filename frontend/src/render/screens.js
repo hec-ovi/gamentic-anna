@@ -106,7 +106,47 @@ export function renderLibrary(state) {
       <main class="lib-main">${body}</main>
       ${state.confirm ? renderConfirm(state.confirm) : ""}
       ${state.exportChoice ? renderExportChoice(state.exportChoice) : ""}
+      ${state.exportView ? renderExportView(state.exportView) : ""}
+      ${state.importView ? renderImportView(state.importView, state.importing) : ""}
     </div>`;
+}
+
+// Anna-mode export delivery: the sandboxed iframe blocks blob downloads, so the
+// JSON shows in place - Copy is the reliable path; the data: link is best-effort
+// (some sandboxes allow it, none are harmed by it).
+export function renderExportView(ex) {
+  const dataHref = `data:application/json;base64,${btoa(unescape(encodeURIComponent(ex.json)))}`;
+  return modalShell({
+    overlayAct: "close-export-view",
+    title: `Export "${ex.title}"`,
+    titleIcon: "send",
+    ariaLabel: `Export "${ex.title}"`,
+    cls: "export-view",
+    body: `<p class="modal-body">Copy the JSON and keep it as <code>${escapeHtml(ex.filename)}</code>. Import it later from any install.</p>
+           <textarea id="exportJson" class="holo-input export-json" readonly aria-label="Exported adventure JSON">${escapeHtml(ex.json)}</textarea>`,
+    actions: `
+      <button class="holo-btn" data-act="copy-export">${icon("copy")}<span>Copy</span></button>
+      <a class="holo-btn" href="${dataHref}" download="${escapeHtml(ex.filename)}">${icon("send")}<span>Download</span></a>
+      <button class="holo-btn" data-act="close-export-view">Close</button>`,
+  });
+}
+
+// Anna-mode import: paste the export JSON (the file picker is unreliable inside
+// the sandboxed iframe; outside Anna the picker path stays).
+export function renderImportView(iv, importing) {
+  return modalShell({
+    overlayAct: "close-import-view",
+    title: "Import an adventure",
+    titleIcon: "rotate",
+    ariaLabel: "Import an adventure",
+    cls: "import-view",
+    body: `<p class="modal-body">Paste the JSON of an exported adventure (template or checkpoint). Importing always creates a new game.</p>
+           <textarea id="importJson" class="holo-input import-json" aria-label="Exported adventure JSON to import" placeholder='{"gamentic": ...}'>${escapeHtml(iv.text || "")}</textarea>
+           ${iv.error ? `<p class="modal-error" role="alert">${escapeHtml(iv.error)}</p>` : ""}`,
+    actions: `
+      <button class="holo-btn" data-act="confirm-import" ${importing ? "disabled" : ""}>${icon("rotate")}<span>${importing ? "Importing..." : "Import"}</span></button>
+      <button class="holo-btn" data-act="close-import-view">Cancel</button>`,
+  });
 }
 
 export function renderGameCard(game) {

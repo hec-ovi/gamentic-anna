@@ -142,7 +142,10 @@ export async function openGame(gameId) {
   }
 }
 
-// Export an adventure card: fetch the JSON, hand it to the browser as a download.
+// Export an adventure card: fetch the JSON, then hand it over. Standalone: a real
+// browser download. Anna: the sandboxed iframe blocks blob downloads, so the JSON
+// opens in a modal instead - copy it (or try the best-effort data: link) and keep
+// it as a file yourself.
 export async function exportGame(gameId, kind, title) {
   if (!gameId || state.exporting) return; // one export at a time
   state.exporting = true;
@@ -153,12 +156,38 @@ export async function exportGame(gameId, kind, title) {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-+|-+$/g, "") || "adventure";
-    downloadJson(data, `${slug}-${kind}.json`);
-    showToast(kind === "template" ? "Adventure exported - share the file." : "This moment is saved.");
+    const filename = `${slug}-${kind}.json`;
+    if (state.annaMode) {
+      state.exportView = { title: title || "adventure", kind, filename,
+                           json: JSON.stringify(data, null, 2) };
+      render();
+    } else {
+      downloadJson(data, filename);
+      showToast(kind === "template" ? "Adventure exported - share the file." : "This moment is saved.");
+    }
   } catch (err) {
     showToast(err.message || "Could not export this adventure.");
   } finally {
     state.exporting = false;
+  }
+}
+
+// Copy the open export to the clipboard (the reliable path inside the sandbox).
+export async function copyExportJson() {
+  const ex = state.exportView;
+  if (!ex) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(ex.json);
+    } else {
+      const ta = root.querySelector("#exportJson");
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+    }
+    showToast("Copied - paste it into a file to keep it.");
+  } catch {
+    showToast("Could not copy; select the text and copy it yourself.");
   }
 }
 
@@ -175,8 +204,36 @@ export function downloadJson(data, filename) {
   setTimeout(() => URL.revokeObjectURL?.(url), 5000);
 }
 
+// Import size rails: past WARN the invoke transport gets slow (one JSON body over
+// anna.tools.invoke); past MAX (the host's inline ceiling) it will not arrive at all.
+const IMPORT_WARN_BYTES = 2 * 1024 * 1024;
+const IMPORT_MAX_BYTES = 8 * 1024 * 1024;
+
 // Import a previously exported adventure (template or checkpoint): always a
-// NEW game; navigate straight into it.
+// NEW game; navigate straight into it. `payload` is the parsed export JSON,
+// whatever surface delivered it (file picker, paste modal).
+export async function importGamePayload(payload) {
+  if (!payload || state.importing) return;
+  const bytes = JSON.stringify(payload).length;
+  if (bytes > IMPORT_MAX_BYTES) {
+    showToast("That export is too large to import here (over 8MB).");
+    return;
+  }
+  if (bytes > IMPORT_WARN_BYTES) showToast("Large export - the import may take a while.");
+  state.importing = true;
+  render();
+  try {
+    const res = await api.importGame(payload);
+    state.importing = false;
+    state.importView = null;
+    openGame(res.game_id);
+  } catch (err) {
+    state.importing = false;
+    showToast(err.message || "That file is not a gamentic export.");
+    render();
+  }
+}
+
 export async function importGameFile(file) {
   if (!file || state.importing) return;
   let payload;
@@ -186,17 +243,27 @@ export async function importGameFile(file) {
     showToast("That file is not a gamentic export.");
     return;
   }
-  state.importing = true;
-  render();
+  await importGamePayload(payload);
+}
+
+// The paste-import path (Anna: the sandboxed iframe cannot reliably open a file
+// picker). Reads the modal's textarea, keeps the text on a parse error so nothing
+// typed is lost.
+export function importPastedJson() {
+  const ta = root.querySelector("#importJson");
+  const text = ta ? ta.value : "";
+  if (!state.importView) return;
+  state.importView.text = text;
+  let payload;
   try {
-    const res = await api.importGame(payload);
-    state.importing = false;
-    openGame(res.game_id);
-  } catch (err) {
-    state.importing = false;
-    showToast(err.message || "That file is not a gamentic export.");
+    payload = JSON.parse(text);
+  } catch {
+    state.importView.error = "That is not valid export JSON.";
     render();
+    return;
   }
+  state.importView.error = "";
+  importGamePayload(payload);
 }
 
 // Blob.text() with a FileReader fallback (older engines / jsdom variants).
