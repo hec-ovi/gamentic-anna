@@ -1,10 +1,13 @@
 # local env + databases (never publish)
 .env
+.env.publish
 *.db
 *.db-*
 
 # anna cli working dir (dev tokens, recordings, staged bundle)
 .anna/
+# throwaway clean-SPA staging dir for `apps push --bundle-dir` (see docs/RELEASE.md step 5)
+.bundle/
 
 # deps / build / caches
 node_modules/

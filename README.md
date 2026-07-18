@@ -105,10 +105,14 @@ Top to bottom is the call path: the iframe UI invokes the Executa, which runs th
 
 ## 🚢 Develop and ship
 
-There is no local preview. Every change ships to Anna: build the wheel, publish to
-PyPI, update the Executa and the App on the Anna console, then play it through your
-local Agent. The whole checklist is [docs/RELEASE.md](docs/RELEASE.md); running the
-Agent in Docker is [anna-agent/README.md](anna-agent/README.md).
+There is no local preview. **Two artifacts ship, kept at one version in lockstep:**
+
+- **The Executa** (the game engine). A Python package, `tool-gamentic-engine-7h8aweky`, published to PyPI as one `py3-none-any` wheel (`backend/pyproject.toml` builds it), then registered on Anna's Executa Hub via `backend/executa.json` (identity pinned to `executa_id=1025` in `backend/.anna/executa.json`). On Install Essentials the Agent runs `uv tool install <package>==<version>` from PyPI, so the wheel must be published at that version FIRST.
+- **The App** (the runtime the player sees). The `frontend/` static SPA plus `manifest.publish.json`, pushed and cut on Anna (`app_id=19`, slug `gamentic-anna`).
+
+Bump the version everywhere, run the tests, build the wheel and `uv publish` it to PyPI, `executa publish`, then `apps push` / `cut` / `release`, and play it through your local Agent. The full checklist (exact commands, the auth PAT, dry-runs) is [docs/RELEASE.md](docs/RELEASE.md); running the Agent in Docker is [anna-agent/README.md](anna-agent/README.md).
+
+> 📚 **Anna platform docs.** The full platform reference the backend is built against: [anna.partners/llms-full.txt](https://anna.partners/llms-full.txt) (Executas, reverse-RPC sampling, agent sessions, storage, App manifests, the App Host API). Two hands-on companion guides sit in the repo: [anna-app.md](anna-app.md) (build and push an Anna App end to end) and [executa-release-binary.md](executa-release-binary.md) (package an Executa as a multi-platform binary; gamentic ships the simpler uv/PyPI wheel instead of per-platform binaries).
 
 > 🔑 **Pick a model.** Anna serves whatever model your account selects (LLM / Model Selection). Self-hosted models see more gateway (502) hiccups and ship smaller context; a Pro-tier (OpenRouter-backed) model gives steadier responses and far more context.
 

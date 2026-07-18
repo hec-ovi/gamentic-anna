@@ -191,7 +191,7 @@ def test_native_full_adventure(host):
     # plus llm.image + host.upload for renders and identity-reference uploads.
     assert man["host_capabilities"] == ["llm.sample", "llm.agent.auto", "llm.image", "host.upload"]
     assert [t["name"] for t in man["tools"]] == ["request"]
-    assert man["version"] == "0.4.0"            # synced: serverInfo + describe + pyproject + executa.json + app
+    assert man["version"] == "0.2.13"           # synced: serverInfo + describe + pyproject + executa.json + app
 
     # empty library, then create a world (no LLM: the WorldSheet is posted directly)
     assert host.invoke("/games")["json"] == {"games": []}
