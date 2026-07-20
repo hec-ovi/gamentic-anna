@@ -79,6 +79,7 @@ class MockHost:
         self.character_replies = []          # FIFO of plain strings
         self.sample_calls = 0
         self.image_calls = 0
+        self.image_params = []               # params of every image/generate|edit frame
         threading.Thread(target=self._read, daemon=True).start()
 
     # -- stdio --
@@ -100,6 +101,7 @@ class MockHost:
                 self._answer_sampling(msg)
             elif method in ("image/generate", "image/edit"):
                 self.image_calls += 1
+                self.image_params.append(msg.get("params") or {})
                 self._send({"jsonrpc": "2.0", "id": msg["id"], "result": {
                     "images": [{"url": TINY_PNG_URI, "mimeType": "image/png"}]}})
             elif not method:                 # a response to one of MY requests
@@ -191,7 +193,7 @@ def test_native_full_adventure(host):
     # plus llm.image + host.upload for renders and identity-reference uploads.
     assert man["host_capabilities"] == ["llm.sample", "llm.agent.auto", "llm.image", "host.upload"]
     assert [t["name"] for t in man["tools"]] == ["request"]
-    assert man["version"] == "0.2.13"           # synced: serverInfo + describe + pyproject + executa.json + app
+    assert man["version"] == "0.2.14"           # synced: serverInfo + describe + pyproject + executa.json + app
 
     # empty library, then create a world (no LLM: the WorldSheet is posted directly)
     assert host.invoke("/games")["json"] == {"games": []}
@@ -328,3 +330,39 @@ def test_native_image_pipeline_media_refs_and_media64(host_images):
     # plus a missing file 404s cleanly through the same transport
     missing = host.invoke(f"/media64/{gid}/never-was.png")
     assert missing["status"] == 404
+
+
+# fal.ai wave (Anna 1.1.0-beta.96): when a fal model hint and the advanced render
+# options are configured, every image/generate the executa reverse-RPCs must carry
+# them on the literal frame - and the unset knobs must stay off the wire entirely.
+@pytest.fixture
+def host_fal(tmp_path):
+    h = MockHost(str(tmp_path), IMAGE_ENABLED="true",
+                 IMAGE_MODEL_HINT="fal-ai/nano-banana-2",
+                 IMAGE_RESOLUTION="2k",                 # config upper-cases -> "2K"
+                 IMAGE_OUTPUT_FORMAT="webp")
+    try:
+        yield h
+    finally:
+        h.close()
+
+
+def test_native_image_generate_carries_fal_hint_and_options(host_fal):
+    host = host_fal
+    host.call(1, "initialize", {"protocolVersion": "2.0"})
+    created = host.invoke("/games", "POST", WORLD)
+    assert created["status"] == 200, created
+
+    # creation art runs DETACHED; wait for the first render to reverse-RPC the host
+    deadline = time.time() + 30
+    while time.time() < deadline and not host.image_params:
+        time.sleep(0.1)
+    assert host.image_params, "no image/generate reached the mock host"
+
+    p = host.image_params[0]
+    assert p["modelPreferences"] == {"hints": [{"name": "fal-ai/nano-banana-2"}]}
+    assert p["resolution"] == "2K"
+    assert p["output_format"] == "webp"
+    # unset knobs are omitted, never sent as empty strings
+    for absent in ("quality", "enable_web_search", "thinking_level"):
+        assert absent not in p, p

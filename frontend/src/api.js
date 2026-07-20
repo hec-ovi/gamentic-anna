@@ -81,14 +81,29 @@ export function createApi(backendUrl, { invoke = null } = {}) {
   // with a short backoff before giving up - this is what keeps resume from bouncing you to
   // the menu when the executa cycles mid-open. POSTs (actions, creation) are NOT retried:
   // they are not idempotent and a slow turn that blows the 65s cap must surface, not double-fire.
+  //
+  // Cloud Agents (Anna 1.1.0-beta.78+) add one exception: `agent_waking` and
+  // `executa_not_deployed` mean the suspended agent had not started and the invoke was
+  // NEVER delivered to the executa, so retrying is safe for ANY method - a POST cannot
+  // double-fire on a call that never ran. The host SDK already waits adaptively; this
+  // is the top-up for the case where its own retry window ran out first.
+  function neverDelivered(err) {
+    const e = err && err.body && err.body.error;
+    const raw = (typeof e === "string" ? e : (e && (e.message || JSON.stringify(e))) || "").toLowerCase();
+    return /agent_waking|executa_not_deployed/.test(raw);
+  }
   function retriable(err, method) {
-    return method === "GET" && err instanceof ApiError && (err.status === 0 || err.status === 502);
+    if (!(err instanceof ApiError)) return false;
+    if (err.status === 502 && neverDelivered(err)) return true;
+    return method === "GET" && (err.status === 0 || err.status === 502);
   }
 
   async function request(path, { method = "GET", body, timeout = READ_TIMEOUT_MS } = {}) {
-    // Retry only over the Anna invoke transport (where the executa recycles under us); the
-    // plain HTTP path has no executa to drop a call, so a hang there surfaces immediately.
-    const attempts = invoke && method === "GET" ? 4 : 1;
+    // Retry only over the Anna invoke transport (where the executa recycles under us,
+    // and where a cloud agent may still be waking); the plain HTTP path has no executa
+    // to drop a call, so a hang there surfaces immediately. The retriable() gate keeps
+    // POSTs single-shot except for the never-delivered cloud-agent errors above.
+    const attempts = invoke ? 4 : 1;
     let lastErr;
     for (let i = 0; i < attempts; i++) {
       try {
@@ -169,6 +184,13 @@ async function readBody(response) {
 // player cannot act on). Buckets follow Anna's sampling / image / agent error tables.
 export function annaErrorMessage(error) {
   const raw = (typeof error === "string" ? error : (error && (error.message || JSON.stringify(error))) || "").toLowerCase();
+  // Cloud agent wake-on-demand: the invoke was never delivered; a moment later it works.
+  if (/agent_waking|executa_not_deployed/.test(raw))
+    return "Anna's agent is waking up. Give it a moment and try again.";
+  // -32015 APP_QUOTA_EXCEEDED "Subscription expired": more precise than the generic
+  // usage-limit line (must come BEFORE the quota bucket - the errorCode contains "quota").
+  if (/-32015|subscription/.test(raw))
+    return "Anna subscription expired or out of credits. Renew it at anna.partners.";
   if (/\b50[234]\b|bad gateway|gateway|upstream|provider error|-32000|-32003|-32046|-32103/.test(raw))
     return "Anna's model is temporarily unavailable. Please try again in a moment.";
   if (/-32006|-32007|max.?(calls|tokens)|cumulative|too many calls/.test(raw))

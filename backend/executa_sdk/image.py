@@ -194,16 +194,29 @@ class ImageClient:
         size: Optional[str] = None,
         reference_image_urls: Optional[List[str]] = None,
         model_preferences: Optional[dict] = None,
+        quality: Optional[str] = None,
+        resolution: Optional[str] = None,
+        output_format: Optional[str] = None,
+        enable_web_search: Optional[bool] = None,
+        thinking_level: Optional[str] = None,
         metadata: Optional[dict] = None,
         timeout: float = DEFAULT_TIMEOUT,
     ) -> dict:
         """Generate ``n`` images from a text ``prompt``.
 
+        The advanced options (host 1.1.0-beta.96+, the fal.ai provider wave) are
+        sent only when given, so an older host never sees a param it can't
+        validate. Each applies to the model family that understands it and is
+        ignored otherwise: ``quality`` (``low|medium|high``, gpt-image family),
+        ``resolution`` (``0.5K|1K|2K|4K``, nano-banana family), ``output_format``
+        (``png|jpeg|webp``, fal-hosted models), ``enable_web_search`` and
+        ``thinking_level`` (``minimal|high``) are nano-banana-2 generate add-ons.
+
         Returns the host's response dict, typically::
 
             {
               "images": [{"url": "https://r2.example.com/...", "mimeType": "image/png"}, ...],
-              "model": "dall-e-3",
+              "model": "fal-ai/nano-banana-2",
               "quota_used": {"image_count": 2},
             }
 
@@ -216,6 +229,16 @@ class ImageClient:
             params["reference_image_urls"] = list(reference_image_urls)
         if model_preferences is not None:
             params["modelPreferences"] = model_preferences
+        if quality is not None:
+            params["quality"] = quality
+        if resolution is not None:
+            params["resolution"] = resolution
+        if output_format is not None:
+            params["output_format"] = output_format
+        if enable_web_search is not None:
+            params["enable_web_search"] = bool(enable_web_search)
+        if thinking_level is not None:
+            params["thinking_level"] = thinking_level
         if metadata is not None:
             params["metadata"] = metadata
         return await self._call(METHOD_IMAGE_GENERATE, params, timeout)
@@ -229,6 +252,9 @@ class ImageClient:
         n: int = 1,
         size: Optional[str] = None,
         model_preferences: Optional[dict] = None,
+        quality: Optional[str] = None,
+        resolution: Optional[str] = None,
+        output_format: Optional[str] = None,
         metadata: Optional[dict] = None,
         timeout: float = DEFAULT_TIMEOUT,
     ) -> dict:
@@ -237,6 +263,10 @@ class ImageClient:
         ``mask_url`` is optional. Without it, the provider does whole-image
         edit; with it, only masked pixels change. Mask must be a 1-channel
         PNG with the same dimensions as ``image_url`` (white = edit).
+
+        ``quality`` / ``resolution`` / ``output_format`` follow the same
+        host-1.1.0-beta.96+ semantics as :meth:`generate` (sent only when
+        given; each model family ignores what it doesn't understand).
 
         Raises :class:`ImageError`; codes -32311/-32312 indicate the
         provider does not support edit or masking.
@@ -252,6 +282,12 @@ class ImageClient:
             params["size"] = size
         if model_preferences is not None:
             params["modelPreferences"] = model_preferences
+        if quality is not None:
+            params["quality"] = quality
+        if resolution is not None:
+            params["resolution"] = resolution
+        if output_format is not None:
+            params["output_format"] = output_format
         if metadata is not None:
             params["metadata"] = metadata
         return await self._call(METHOD_IMAGE_EDIT, params, timeout)

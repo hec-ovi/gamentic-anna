@@ -97,6 +97,40 @@ describe("anna executa transport", () => {
     await api.takeAction("g1", "x").catch(() => {});
     expect(invoke).toHaveBeenCalledTimes(1);
   });
+
+  // Cloud Agents (1.1.0-beta.78+): `agent_waking` / `executa_not_deployed` mean the
+  // invoke was NEVER delivered to the executa, so even a POST retries safely - it
+  // cannot double-fire a call that never ran.
+  it("retries a POST while the cloud agent is waking, then succeeds", async () => {
+    let n = 0;
+    const invoke = vi.fn(async () => {
+      n += 1;
+      if (n < 3) return { success: false, error: "[-32050] agent_waking: cloud agent is starting" };
+      return { status: 200, json: { beats: [] } };
+    });
+    const api = createApi("x", { invoke });
+    await expect(api.takeAction("g1", "open the door")).resolves.toEqual({ beats: [] });
+    expect(invoke).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries a POST through executa_not_deployed (deploy reconciliation in flight)", async () => {
+    let n = 0;
+    const invoke = vi.fn(async () => (++n === 1
+      ? { success: false, error: "executa_not_deployed: plugin missing on agent, redeploying" }
+      : { status: 200, json: { game_id: "g9" } }));
+    const api = createApi("x", { invoke });
+    await expect(api.createGame({ title: "t" })).resolves.toEqual({ game_id: "g9" });
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up on a cloud agent that never wakes, with the waking line", async () => {
+    const invoke = vi.fn(async () => ({ success: false, error: "[-32050] agent_waking" }));
+    const api = createApi("x", { invoke });
+    const err = await api.takeAction("g1", "x").then(() => null, (e) => e);
+    expect(err).toMatchObject({ name: "ApiError", status: 502 });
+    expect(err.message).toMatch(/waking/i);
+    expect(invoke).toHaveBeenCalledTimes(4);      // bounded: the 4-attempt ladder, then surface
+  });
 });
 
 // The synchronous window detector that lets boot switch to Anna mode on the first
@@ -157,6 +191,16 @@ describe("annaErrorMessage", () => {
     expect(annaErrorMessage("[-32002] quota exceeded")).toMatch(/usage limit/i);
     expect(annaErrorMessage("[-32001] sampling not granted")).toMatch(/granted/i);
     expect(annaErrorMessage("[-32005] timed out after 300s")).toMatch(/too long/i);
+  });
+  it("maps cloud-agent wake errors to the waking line", () => {
+    expect(annaErrorMessage("[-32050] agent_waking: cloud agent is starting")).toMatch(/waking/i);
+    expect(annaErrorMessage("executa_not_deployed: plugin missing on agent")).toMatch(/waking/i);
+  });
+  it("maps -32015 subscription-expired to its own line, not the generic quota one", () => {
+    const raw = 'HTTP 429 {"code":-32015,"errorCode":"APP_QUOTA_EXCEEDED","message":"Subscription expired. Please renew to continue."}';
+    expect(annaErrorMessage(raw)).toMatch(/subscription/i);
+    // plain quota (no subscription wording) still lands in the usage-limit bucket
+    expect(annaErrorMessage("[-32102] image quota exceeded")).toMatch(/usage limit/i);
   });
   it("falls back to a generic, action-safe line for anything else", () => {
     expect(annaErrorMessage("kaboom")).toMatch(/couldn't complete/i);

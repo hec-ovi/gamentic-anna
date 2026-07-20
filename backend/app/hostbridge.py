@@ -48,6 +48,37 @@ IMG_QUOTA_CODES = frozenset({-32106, -32107})   # rolling window / per-call gran
 IMG_NOT_GRANTED = -32101
 IMG_NO_PROVIDER = -32109
 
+# Advanced image options (host 1.1.0-beta.96+, the fal.ai provider wave). A value
+# outside the documented enum is dropped with a warning instead of sent: it would ride
+# through as a deterministic -32104 on EVERY render and burn the asset heal allowance.
+_IMG_OPTION_VALUES = {
+    "quality": frozenset({"low", "medium", "high"}),          # gpt-image family
+    "resolution": frozenset({"0.5K", "1K", "2K", "4K"}),      # nano-banana family
+    "output_format": frozenset({"png", "jpeg", "webp"}),      # fal-hosted models
+    "thinking_level": frozenset({"minimal", "high"}),         # nano-banana-2 generate
+}
+
+
+def _image_options() -> dict:
+    """Configured advanced options for image/generate, validated per the host enums.
+    Empty knobs are omitted entirely so an older host never sees an unknown param."""
+    configured = {"quality": settings.IMAGE_QUALITY,
+                  "resolution": settings.IMAGE_RESOLUTION,
+                  "output_format": settings.IMAGE_OUTPUT_FORMAT,
+                  "thinking_level": settings.IMAGE_THINKING_LEVEL}
+    opts: dict = {}
+    for key, value in configured.items():
+        if not value:
+            continue
+        if value not in _IMG_OPTION_VALUES[key]:
+            logging.getLogger("gamentic.image").warning(
+                "ignoring %s=%r (allowed: %s)", key, value, sorted(_IMG_OPTION_VALUES[key]))
+            continue
+        opts[key] = value
+    if settings.IMAGE_WEB_SEARCH:
+        opts["enable_web_search"] = True
+    return opts
+
 
 class ImageQuotaExhausted(RuntimeError):
     """image/generate hit the host's per-invoke image quota (rolling window).
@@ -168,6 +199,7 @@ def generate_image_sync(
 
     prefs = ({"hints": [{"name": settings.IMAGE_MODEL_HINT}]}
              if settings.IMAGE_MODEL_HINT else None)
+    options = _image_options()
 
     def _make():
         return ch.image.generate(
@@ -177,11 +209,13 @@ def generate_image_sync(
             reference_image_urls=reference_image_urls or None,
             model_preferences=prefs,
             timeout=timeout,
+            **options,
         )
 
     log = logging.getLogger("gamentic.image")
-    log.info("image/generate -> size=%s refs=%d hint=%s prompt=%.80r", size,
-             len(reference_image_urls or []), settings.IMAGE_MODEL_HINT or "-", prompt)
+    log.info("image/generate -> size=%s refs=%d hint=%s opts=%s prompt=%.80r", size,
+             len(reference_image_urls or []), settings.IMAGE_MODEL_HINT or "-",
+             options or "-", prompt)
     try:
         result = _call_with_retry(_make, ch.loop, result_timeout=timeout + 15)
     except Exception as exc:

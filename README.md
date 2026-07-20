@@ -131,11 +131,13 @@ manifest.publish.json    the Anna App manifest (iframe view, required executa, h
 executa-manifest.json    the describe manifest pasted into the Anna console
 anna-agent/              Docker setup for the Anna local Agent (the executa runtime)
 docs/RELEASE.md          the ship-a-release checklist
+docs/about-cloud-agent.md       Anna's Cloud Agent notes (what changes for executas, APS transfer)
+docs/anna-beta55-96-changelog.md  the Anna 1.1.0-beta.55..96 release digest (fal.ai wave, cloud agent)
 ```
 
 ## 🧪 Tests
 
-**608 backend + 257 frontend tests pass.**
+**615 backend + 262 frontend tests pass.**
 
 ```sh
 # frontend (vitest + Testing Library, msw, jsdom)

@@ -155,9 +155,22 @@ class Settings:
     # (app_kv), so an executa restart does NOT re-open a poisoned asset's allowance;
     # a successful render clears its counter.
     IMAGE_HEAL_MAX_ATTEMPTS = max(1, int(os.getenv("IMAGE_HEAL_MAX_ATTEMPTS", "3")))
-    # Optional provider hint for Anna's image/generate (modelPreferences.hints[].name,
-    # e.g. "dall-e-3"). Empty = let the host route to the user's preferred provider.
+    # Optional provider hint for Anna's image/generate (modelPreferences.hints[].name).
+    # Since Anna 1.1.0-beta.96 the host also routes fal.ai-hosted models, e.g.
+    # "fal-ai/nano-banana-2", "gpt-image-2", "seedream". Empty = let the host route to
+    # the user's preferred provider; an unknown hint silently falls back host-side.
     IMAGE_MODEL_HINT = os.getenv("IMAGE_MODEL_HINT", "").strip()
+    # Advanced render options (host 1.1.0-beta.96+). Sent ONLY when set, so an older
+    # host never sees a param it can't validate; each applies to the model family that
+    # understands it and is ignored otherwise. quality: low|medium|high (gpt-image,
+    # drives per-image pricing). resolution: 0.5K|1K|2K|4K (nano-banana, rate
+    # multiplier). output_format: png|jpeg|webp (fal-hosted). Web search + thinking
+    # level are nano-banana-2 generate add-ons; both bill a small surcharge.
+    IMAGE_QUALITY = os.getenv("IMAGE_QUALITY", "").strip().lower()
+    IMAGE_RESOLUTION = os.getenv("IMAGE_RESOLUTION", "").strip().upper()
+    IMAGE_OUTPUT_FORMAT = os.getenv("IMAGE_OUTPUT_FORMAT", "").strip().lower()
+    IMAGE_WEB_SEARCH = os.getenv("IMAGE_WEB_SEARCH", "false").lower() == "true"
+    IMAGE_THINKING_LEVEL = os.getenv("IMAGE_THINKING_LEVEL", "").strip().lower()
     # When the host reports the per-invoke image quota exhausted (-32106, a rolling
     # ~30min window), ambient rendering pauses this many seconds instead of burning
     # heal attempts on renders that cannot succeed. Player-initiated looks still try.
